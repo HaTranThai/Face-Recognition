@@ -61,10 +61,9 @@ jobs:
 
       - name: Build and push multi-container app using docker-compose
         run: docker-compose -f docker-compose.yml build
-
   deploy_production:
     if: github.ref == 'refs/heads/main'
-    # needs: build
+    needs: build
     runs-on: ubuntu-latest
 
     steps:
