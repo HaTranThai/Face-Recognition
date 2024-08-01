@@ -14,7 +14,7 @@ RUN pip3 install uvicorn
 RUN pip3 install requests
 RUN pip3 install python-multipart
 RUN mkdir -p /root/.deepface/weights
-RUN wget -O /root/.deepface/weights/facenet512_weights.h5 https://github.com/serengil/deepface_models/releases/download/v1.0/facenet512_weights.h5
+RUN wget -O /root/.deepface/weights/arcface_weights.h5 https://github.com/serengil/deepface_models/releases/download/v1.0/arcface_weights.h5
 
 EXPOSE 2024
 

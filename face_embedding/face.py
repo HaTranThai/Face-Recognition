@@ -80,10 +80,10 @@ class FaceRecog(BaseModel):
 def get_embedding(imgf):
     embedding_objs = DeepFace.represent(
         img_path = imgf,
-        model_name= "Facenet512",
+        model_name= "ArcFace",
         detector_backend = "skip",
         align = True,
-        normalization = "Facenet"
+        normalization = "ArcFace"
     )
     return embedding_objs[0]['embedding']
 
