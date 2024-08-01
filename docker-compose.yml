@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant-container
+    networks:
+      - network_face_code
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+      - ./snapshots:/qdrant/snapshots
+
+  fastapi:
+    build: ./app/
+    container_name: fastapi-container
+    networks:
+      - network_face_code
+    ports:
+      - "7005:7005"
+    volumes:
+      - ./app:/app
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7005", "--reload"]
+    depends_on:
+      - qdrant
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - FASTAPI_PORT=7005
+  
+  face_recognition:
+    build: ./face_embedding/
+    container_name: face_embedding-container
+    networks:
+      - network_face_code
+    ports:
+      - "2024:2024"
+    volumes:
+      - ./face_embedding:/face_embedding
+      - ./snapshots:/face_embedding/snapshots
+    command: ["python3","-m","uvicorn", "face:app", "--host", "0.0.0.0", "--port", "2024", "--reload"]
+    depends_on:
+      - qdrant
+      - fastapi
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - FASTAPI_HOST=fastapi
+      - FASTAPI_PORT=7005
+      - FACE_PORT=2024
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  qdrant_data:
+
+networks:
+  network_face_code:
+    driver: bridge

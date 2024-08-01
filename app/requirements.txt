@@ -1,0 +1,6 @@
+httpx
+fastapi 
+uvicorn
+qdrant-client
+# pandas
+# torch

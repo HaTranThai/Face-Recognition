@@ -1,0 +1,9 @@
+.nvenv/
+.venv/
+__pycache__/
+*/__pycache__/*
+snapshots/
+test/
+AutoSaveData.log
+face_recognition
+models_yolo/*
