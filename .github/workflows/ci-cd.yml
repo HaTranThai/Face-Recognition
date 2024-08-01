@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - staging
   pull_request:
     branches:
       - main
+      - staging
 
 jobs:
   build:
@@ -60,7 +62,9 @@ jobs:
       - name: Build and push multi-container app using docker-compose
         run: docker-compose -f docker-compose.yml build
 
-  deploy:
+  deploy_production:
+    if: github.ref == 'refs/heads/main'
+    # needs: build
     runs-on: ubuntu-latest
 
     steps:
@@ -78,8 +82,7 @@ jobs:
           export PYTHONPATH=$PYTHONPATH:/home/bbsw/.local/lib/python3.6/site-packages
           cd /home/bbsw/Face_Recognition_JetNano
           git checkout -- autoOPENapp.sh
-          git checkout -- face_embedding/face.py
-          git pull origin main
+          git pull https://{{ secrets.PASSWORD_TOKEN_GITHUB }}@github.com/Bluebolt-Software-AI-LAB/Face_Recognition_JetNano.git main
           docker-compose down
           docker-compose pull
           docker-compose up -d --build
