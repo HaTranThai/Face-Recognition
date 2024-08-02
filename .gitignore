@@ -7,3 +7,4 @@ test/
 AutoSaveData.log
 face_recognition
 models_yolo/*
+backup_image.img.gz

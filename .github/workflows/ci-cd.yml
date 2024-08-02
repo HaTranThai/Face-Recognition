@@ -63,7 +63,7 @@ jobs:
         run: docker-compose -f docker-compose.yml build
   deploy_production:
     if: github.ref == 'refs/heads/main'
-    # needs: build
+    needs: build
     runs-on: ubuntu-latest
 
     steps:
@@ -81,7 +81,7 @@ jobs:
           export PYTHONPATH=$PYTHONPATH:/home/bbsw/.local/lib/python3.6/site-packages
           cd /home/bbsw/Face_Recognition_JetNano
           git checkout -- autoOPENapp.sh
-          git pull https://${{ secrets.PASSWORD_TOKEN_GITHUB }}@github.com/Bluebolt-Software-AI-LAB/Face_Recognition_JetNano.git main
+          git pull https://${{ secrets.PASSWORD_TOKEN_GITHUB }}@github.com/${{ secrets.LINK_PROJECT }} main
           docker-compose down
           docker-compose pull
           docker-compose up -d --build
