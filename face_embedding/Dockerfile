@@ -4,7 +4,8 @@ ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 RUN python3 -m pip install --upgrade pip
 RUN apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
-# RUN pip3 install opencv-python==4.5.*
+RUN pip3 install opencv-python
+RUN pip3 install tensorflow==2.13.0
 RUN pip3 install deepface
 
 WORKDIR /face_embedding
