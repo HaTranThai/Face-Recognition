@@ -79,7 +79,7 @@ jobs:
         key: ${{ secrets.SSH_CLOUD_PRIVATE_KEY }}
         script: |
           cd /home/administrator/BBSW/Face_Recognition_JetNano
-          git pull https://${{ secrets.PASSWORD_TOKEN_GITHUB }}@github.com/${{ secrets.LINK_PROJECT }} -b staging_cloud
+          git pull https://${{ secrets.PASSWORD_TOKEN_GITHUB }}@github.com/${{ secrets.LINK_PROJECT }} staging_cloud
 
   # deploy_production:
   #   if: github.ref == 'refs/heads/main'
