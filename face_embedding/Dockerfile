@@ -1,4 +1,4 @@
-FROM tensorflow/tensorflow:2.13.0
+FROM python:3.9
 
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
