@@ -4,11 +4,11 @@ on:
   push:
     branches:
       - main
-      - staging
+      - staging_cloud
   pull_request:
     branches:
       - main
-      - staging
+      - staging_cloud
 
 jobs:
   build:
@@ -61,6 +61,34 @@ jobs:
 
       - name: Build and push multi-container app using docker-compose
         run: docker-compose -f docker-compose.yml build
+  
+  # deploy_staging:
+  #   if: github.ref == 'refs/heads/staging_cloud'
+  #   # needs: build
+  #   runs-on: ubuntu-latest
+
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v2
+
+  #   - name: Deploy to remote server
+  #     uses: appleboy/ssh-action@v0.1.6
+  #     with:
+  #       host: ${{ secrets.REMOTE_HOST }}
+  #       username: ${{ secrets.REMOTE_USER }}
+  #       key: ${{ secrets.SSH_PRIVATE_KEY }}
+  #       script: |
+  #         export PATH=$PATH:/home/bbsw/.local/bin
+  #         export PYTHONPATH=$PYTHONPATH:/home/bbsw/.local/lib/python3.6/site-packages
+  #         cd /home/bbsw/Face_Recognition_JetNano
+  #         git checkout -- autoOPENapp.sh
+  #         git pull https://${{ secrets.PASSWORD_TOKEN_GITHUB }}@github.com/${{ secrets.LINK_PROJECT }} staging_cloud
+  #         docker-compose down
+  #         docker-compose pull
+  #         docker-compose up -d --build
+  #         chmod 777 autoOPENapp.sh
+  #         sudo sync && sudo sysctl -w vm.drop_caches=3
+
   deploy_production:
     if: github.ref == 'refs/heads/main'
     needs: build
