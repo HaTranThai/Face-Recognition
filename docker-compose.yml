@@ -39,7 +39,7 @@ services:
     volumes:
       - ./face_embedding:/face_embedding
       - ./snapshots:/face_embedding/snapshots
-    command: ["python3","-m","uvicorn", "face:app", "--host", "0.0.0.0", "--port", "2024", "--reload"]
+    command: ["uvicorn", "face:app", "--host", "0.0.0.0", "--port", "2024", "--reload"]
     depends_on:
       - qdrant
       - fastapi
