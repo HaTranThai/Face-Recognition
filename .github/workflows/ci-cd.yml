@@ -78,8 +78,12 @@ jobs:
         username: ${{ secrets.REMOTE_CLOUD_USER }}
         key: ${{ secrets.SSH_CLOUD_PRIVATE_KEY }}
         script: |
+          export PATH=$PATH:/home/bbsw/.local/bin
+          export PYTHONPATH=$PYTHONPATH:/home/bbsw/.local/lib/python3.6/site-packages
           cd /home/administrator/BBSW/Face_Recognition_JetNano
           git pull https://${{ secrets.PASSWORD_TOKEN_GITHUB }}@github.com/${{ secrets.LINK_PROJECT }} staging_cloud
+          docker-compose down
+          docker-compose up -d --build
 
   # deploy_production:
   #   if: github.ref == 'refs/heads/main'
