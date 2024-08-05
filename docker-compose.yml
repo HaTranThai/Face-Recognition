@@ -35,7 +35,7 @@ services:
     networks:
       - network_face_code
     ports:
-      - "80:2024"
+      - "2024:2024"
     volumes:
       - ./face_embedding:/face_embedding
       - ./snapshots:/face_embedding/snapshots
