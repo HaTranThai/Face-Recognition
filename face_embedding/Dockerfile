@@ -3,8 +3,8 @@ FROM tensorflow/tensorflow:2.13.0
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 RUN python3 -m pip install --upgrade pip
-RUN sudo apt install -y libgl1-mesa-glx
-RUN sudo apt install -y libglib2.0-0
+RUN apt install -y libgl1-mesa-glx
+RUN apt install -y libglib2.0-0
 RUN pip3 install opencv-python==4.5.*
 RUN pip3 install deepface
 
