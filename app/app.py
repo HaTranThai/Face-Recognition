@@ -103,7 +103,7 @@ async def create_collection(data:CreateCollection):
     if not _check_exist(collection_name):
         client.create_collection(
             collection_name=collection_name,
-            vectors_config=VectorParams(size=512, distance=Distance.COSINE)
+            vectors_config=VectorParams(size=4096, distance=Distance.COSINE)
             )
         return JSONResponse(status_code=201, content={"message": "Collection created"})
     else:
@@ -160,7 +160,7 @@ async def recover_snapshot(data: RecoverSnapshot):
         if not _check_exist(collection_name):
             client.create_collection(
                 collection_name=collection_name,
-                vectors_config=VectorParams(size=512, distance=Distance.COSINE)
+                vectors_config=VectorParams(size=4096, distance=Distance.COSINE)
                 )
         client.recover_snapshot(
             collection_name=collection_name, location=f"file:///qdrant/snapshots/{path_snapshot}"
@@ -194,7 +194,7 @@ async def insert_point(data:InsertPoint):
     if not _check_exist(collection_name):
         return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
     
-    if embedding is None or len(embedding) != 512:
+    if embedding is None or len(embedding) != 4096:
         return JSONResponse(status_code=404, content={"message": "Embedding not found or invalid!"})
     
     if id is None or id == "":
@@ -239,7 +239,7 @@ async def search_point(data: SearchPoint):
         return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
     
     # if vector_embedding is None or len(vector_embedding) != 128 or not all(isinstance(i, (int, float)) for i in vector_embedding) or not all(-1 <= i <= 1 for i in vector_embedding):
-    if vector_embedding is None or len(vector_embedding) != 512:
+    if vector_embedding is None or len(vector_embedding) != 4096:
         return JSONResponse(status_code=404, content={"message": "Embedding not found or invalid!"})
     
     try:

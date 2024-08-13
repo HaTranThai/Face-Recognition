@@ -80,10 +80,11 @@ class FaceRecog(BaseModel):
 def get_embedding(imgf):
     embedding_objs = DeepFace.represent(
         img_path = imgf,
-        model_name= "ArcFace",
+        model_name= "VGG-Face",
         detector_backend = "skip",
         align = True,
-        normalization = "ArcFace"
+        normalization = "VGGFace2",
+        # anti_spoofing = True,
     )
     return embedding_objs[0]['embedding']
 
@@ -187,10 +188,10 @@ async def face_recog_img_base64(data: FaceRecog):
     x,y,w,h = box
     x1, y1, x2, y2 = int(x), int(y), int(x+w), int(y+h)
     # mở rộng khuôn mặt ra 5px 
-    # x1 = x1 - 20 if x1 - 20 > 0 else 0
-    # y1 = y1 - 20 if y1 - 20 > 0 else 0
-    # x2 = x2 + 20 if x2 + 20 < img_decode.shape[1] else img_decode.shape[1]
-    # y2 = y2 + 20 if y2 + 20 < img_decode.shape[0] else img_decode.shape[0]
+    x1 = x1 - 10 if x1 - 10 > 0 else 0
+    y1 = y1 - 10 if y1 - 10 > 0 else 0
+    x2 = x2 + 10 if x2 + 10 < img_decode.shape[1] else img_decode.shape[1]
+    y2 = y2 + 10 if y2 + 10 < img_decode.shape[0] else img_decode.shape[0]
     
     face = img_decode[y1:y2, x1:x2]
     face = face.astype('uint8')
@@ -304,10 +305,10 @@ async def create_face_img_base64(data: CreateFace):
     x,y,w,h = box
     x1, y1, x2, y2 = int(x), int(y), int(x+w), int(y+h)
     
-    # x1 = x1 - 20 if x1 - 20 > 0 else 0
-    # y1 = y1 - 20 if y1 - 20 > 0 else 0
-    # x2 = x2 + 20 if x2 + 20 < img_decode.shape[1] else img_decode.shape[1]
-    # y2 = y2 + 20 if y2 + 20 < img_decode.shape[0] else img_decode.shape[0]
+    x1 = x1 - 10 if x1 - 10 > 0 else 0
+    y1 = y1 - 10 if y1 - 10 > 0 else 0
+    x2 = x2 + 10 if x2 + 10 < img_decode.shape[1] else img_decode.shape[1]
+    y2 = y2 + 10 if y2 + 10 < img_decode.shape[0] else img_decode.shape[0]
     
     face = img_decode[y1:y2, x1:x2]
     face = face.astype('uint8')
