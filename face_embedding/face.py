@@ -319,7 +319,7 @@ async def create_face_img_base64(data: CreateFace):
     """
     id = data.id
     name = data.name
-    
+    store_id = data.store_id
     check_condition_face = check_condition(data, is_checkin=False)
     if check_condition_face != True:
         return check_condition_face
@@ -352,6 +352,7 @@ async def create_face_img_base64(data: CreateFace):
             "vector_embedding": emb,
             "id": id,
             "name": name,
+            "store_id": store_id
         }
     check = requests.post(URL_INSERT, json=data_insert)
     if check.status_code != 201:

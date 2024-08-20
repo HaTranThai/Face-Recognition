@@ -43,6 +43,7 @@ class InsertPoint(BaseModel):
     vector_embedding: Union[List[int], List[float]] = None
     id: Union[str, None] = ""
     name: Union[str, None] = ""
+    store_id: Union[str, None] = ""
     is_update_id: Union[bool, None] = False
 
 class SearchPoint(BaseModel):
@@ -181,6 +182,7 @@ async def insert_point(data:InsertPoint):
     embedding = data.vector_embedding
     id = data.id
     name = data.name
+    store_id = data.store_id
     is_update_id = data.is_update_id
     time_created = datetime.datetime.now().strftime("%Y/%m/%d")
     
@@ -202,6 +204,7 @@ async def insert_point(data:InsertPoint):
     payload = {
         'id': id,
         'name': name,
+        "store_id": store_id,
         'time_created': time_created
     }
     
