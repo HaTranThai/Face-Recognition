@@ -58,7 +58,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 class CreateFace(BaseModel):
     img_base64: str = Query(None, description="Ảnh chứa mặt để đăng ký")
     id: str = Query(None, description="ID của khách hàng")
@@ -77,7 +76,8 @@ class FaceRecog(BaseModel):
     img_base64: str = Query(None, description="Ảnh chứa mặt để nhận diện")
     role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
     store_id: str = Query(None, description="ID cửa hàng")
-    
+
+
 def get_embedding(imgf):
     embedding_objs = DeepFace.represent(
         img_path = imgf,
@@ -134,7 +134,7 @@ def check_condition(data, is_checkin=True):
             'message': "img_base64 is required"
         })
     
-    if data.role != '1' or data.role != '0':
+    if data.role != '1' and data.role != '0':
         return JSONResponse(content={
             'status': 2,
             'message': "role is 0 or 1"
