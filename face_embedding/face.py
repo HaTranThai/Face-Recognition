@@ -65,13 +65,11 @@ class CreateFace(BaseModel):
     name: str = Query(None, description="Tên của khách hàng")
     role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
     store_id: str = Query(None, description="ID cửa hàng")
-    acc_encode: str = Query(None, description="Mã encode của tài khoản")
 
 
 class DeleteFace(BaseModel):
     id: str = Query(None, description="ID của khách hàng")
     store_id: str = Query(None, description="ID cửa hàng")
-    acc_encode: str = Query(None, description="Mã encode của tài khoản")
     # role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
 
 
@@ -79,8 +77,7 @@ class FaceRecog(BaseModel):
     img_base64: str = Query(None, description="Ảnh chứa mặt để nhận diện")
     role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
     store_id: str = Query(None, description="ID cửa hàng")
-    acc_encode: str = Query(None, description="Mã encode của tài khoản")
-
+    
 def get_embedding(imgf):
     embedding_objs = DeepFace.represent(
         img_path = imgf,
@@ -112,19 +109,16 @@ def save_face_image(data, face,id,name,is_checkin=True):
     if not os.path.exists(f'./{folder_save}'):
         os.makedirs(f'./{folder_save}')
     
-    if not os.path.exists(f'./{folder_save}/{data.acc_encode}'):
-        os.makedirs(f'./{folder_save}/{data.acc_encode}')
-    
-    if not os.path.exists(f'./{folder_save}/{data.acc_encode}/{data.store_id}'):
-        os.makedirs(f'./{folder_save}/{data.acc_encode}/{data.store_id}')
+    if not os.path.exists(f'./{folder_save}/{data.store_id}'):
+        os.makedirs(f'./{folder_save}/{data.store_id}')
     
     time_checkin = datetime.datetime.now().strftime("%Y_%m_%d")
     
-    if not os.path.exists(f'./{folder_save}/{data.acc_encode}/{data.store_id}/{time_checkin}'):
-        os.makedirs(f'./{folder_save}/{data.acc_encode}/{data.store_id}/{time_checkin}')
+    if not os.path.exists(f'./{folder_save}/{data.store_id}/{time_checkin}'):
+        os.makedirs(f'./{folder_save}/{data.store_id}/{time_checkin}')
     
     second_checkin = datetime.datetime.now().strftime("%H_%M_%S")
-    cv2.imwrite(f'./{folder_save}/{data.acc_encode}/{data.store_id}/{time_checkin}/{id}_{name}_{second_checkin}.jpg', face)
+    cv2.imwrite(f'./{folder_save}/{data.store_id}/{time_checkin}/{id}_{name}_{second_checkin}.jpg', face)
     
 def check_condition(data, is_checkin=True):
     if is_checkin == False:
@@ -151,12 +145,7 @@ def check_condition(data, is_checkin=True):
             'status': 2,
             'message': "store_id is required"
         })
-    
-    if data.acc_encode is None or data.acc_encode == "":
-        return JSONResponse(content={
-            'status': 2,
-            'message': "acc_encode is required"
-        })
+
     return True
 
 def detect_n_emb_face(data):
