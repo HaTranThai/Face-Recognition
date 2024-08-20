@@ -49,6 +49,7 @@ class InsertPoint(BaseModel):
 class SearchPoint(BaseModel):
     collection_name: Union[str, None] = ""
     vector_embedding: Union[List[int], List[float]] = None
+    store_id: Union[str, None] = ""
 
 class DeleteCollection(BaseModel):
     collection_name: Union[str, None] = ""
@@ -230,7 +231,7 @@ async def insert_point(data:InsertPoint):
 async def search_point(data: SearchPoint):
     collection_name = data.collection_name
     vector_embedding = data.vector_embedding
-
+    store_id = data.store_id
     if collection_name is None or collection_name == "":
         return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
     
@@ -242,7 +243,14 @@ async def search_point(data: SearchPoint):
         return JSONResponse(status_code=404, content={"message": "Embedding not found or invalid!"})
     
     try:
-        result = client.search(collection_name=collection_name, query_vector=vector_embedding, limit=1)
+        result = client.search(collection_name=collection_name, query_vector=vector_embedding, limit=2, query_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="store_id",
+                    match=models.MatchValue(value=store_id)
+                )
+            ]
+        ))
         print([(i.score, i.payload) for i in result])
         return JSONResponse(status_code=200, content={"message": "Point found", "data": [(i.score, i.payload) for i in result if i.score >= 0.72]})
     except Exception as e:

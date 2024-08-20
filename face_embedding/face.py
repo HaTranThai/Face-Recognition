@@ -263,6 +263,7 @@ async def face_recog_img_base64(data: FaceRecog):
     data_search = {
         "collection_name": collection_name,
         "vector_embedding": emb,
+        "store_id": data.store_id
     }
     # print(requests.post(URL_SEARCH, json=data_search).json())
     search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
@@ -281,8 +282,8 @@ async def face_recog_img_base64(data: FaceRecog):
             'name': name,
         })
     save_face_image(data, img_decode, id, name)
-    del search_db, emb, face, img_decode
-    gc.collect()
+    # del search_db, emb, face, img_decode
+    # gc.collect()
     return JSONResponse(content={
         'status': 1,
         'id': id,
@@ -339,7 +340,9 @@ async def create_face_img_base64(data: CreateFace):
     data_search = {
         "collection_name": collection_name,
         "vector_embedding": emb,
+        "store_id": data.store_id
     }
+    # print(requests.post(URL_SEARCH, json=data_search))
     search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
     search_db = search_db[0] if len(search_db) > 0 else []
     if len(search_db) > 0:
@@ -361,7 +364,7 @@ async def create_face_img_base64(data: CreateFace):
             'message': "Error when insert face"
         })
     save_face_image(data, img_decode, id, name, is_checkin=False)
-    del search_db, emb, face, img_decode
+    # del search_db, emb, face, img_decode
     gc.collect()
     return JSONResponse(content={
         'status': 1,
