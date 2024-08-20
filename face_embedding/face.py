@@ -12,7 +12,6 @@ import numpy as np
 import requests
 import zipfile
 import os
-import socket
 import base64
 import datetime
 import shutil
@@ -65,17 +64,22 @@ class CreateFace(BaseModel):
     id: str = Query(None, description="ID của khách hàng")
     name: str = Query(None, description="Tên của khách hàng")
     role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
+    store_id: str = Query(None, description="ID cửa hàng")
+    acc_encode: str = Query(None, description="Mã encode của tài khoản")
 
 
 class DeleteFace(BaseModel):
     id: str = Query(None, description="ID của khách hàng")
+    store_id: str = Query(None, description="ID cửa hàng")
+    acc_encode: str = Query(None, description="Mã encode của tài khoản")
     # role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
 
 
 class FaceRecog(BaseModel):
     img_base64: str = Query(None, description="Ảnh chứa mặt để nhận diện")
     role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
-    
+    store_id: str = Query(None, description="ID cửa hàng")
+    acc_encode: str = Query(None, description="Mã encode của tài khoản")
 
 def get_embedding(imgf):
     embedding_objs = DeepFace.represent(
@@ -84,7 +88,7 @@ def get_embedding(imgf):
         detector_backend = "skip",
         align = True,
         normalization = "VGGFace2",
-        # anti_spoofing = True,
+        anti_spoofing = True,
     )
     return embedding_objs[0]['embedding']
 
@@ -92,6 +96,106 @@ def adjust_gamma(image, gamma=1.0):
     invGamma = 1.0 / gamma
     table = np.array([(i / 255.0) ** invGamma * 255 for i in np.arange(0, 256)]).astype("uint8")
     return cv2.LUT(image, table)
+
+def save_face_image(data, face,id,name,is_checkin=True):
+    if is_checkin:
+        if data.role == '0':
+            folder_save = "data_face_checkin_customer_images"
+        else:
+            folder_save = "data_face_checkin_employee_images"
+    else:
+        if data.role == '0':
+            folder_save = "data_face_register_customer_images"
+        else:
+            folder_save = "data_face_register_employee_images"
+    # create folder to save face
+    if not os.path.exists(f'./{folder_save}'):
+        os.makedirs(f'./{folder_save}')
+    
+    if not os.path.exists(f'./{folder_save}/{data.acc_encode}'):
+        os.makedirs(f'./{folder_save}/{data.acc_encode}')
+    
+    if not os.path.exists(f'./{folder_save}/{data.acc_encode}/{data.store_id}'):
+        os.makedirs(f'./{folder_save}/{data.acc_encode}/{data.store_id}')
+    
+    time_checkin = datetime.datetime.now().strftime("%Y_%m_%d")
+    
+    if not os.path.exists(f'./{folder_save}/{data.acc_encode}/{data.store_id}/{time_checkin}'):
+        os.makedirs(f'./{folder_save}/{data.acc_encode}/{data.store_id}/{time_checkin}')
+    
+    second_checkin = datetime.datetime.now().strftime("%H_%M_%S")
+    cv2.imwrite(f'./{folder_save}/{data.acc_encode}/{data.store_id}/{time_checkin}/{id}_{name}_{second_checkin}.jpg', face)
+    
+def check_condition(data, is_checkin=True):
+    if is_checkin == False:
+        if data.id is None or data.name is None or data.id == "" or data.name == "":
+            return JSONResponse(content={
+                'status': 2,
+                'message': "id and name are required"
+            })
+    
+    if len(data.img_base64) == 0:
+        return JSONResponse(content={
+            'status': 2,
+            'message': "img_base64 is required"
+        })
+    
+    if data.role != '1' or data.role != '0':
+        return JSONResponse(content={
+            'status': 2,
+            'message': "role is 0 or 1"
+        })
+    
+    if data.store_id is None or data.store_id == "":
+        return JSONResponse(content={
+            'status': 2,
+            'message': "store_id is required"
+        })
+    
+    if data.acc_encode is None or data.acc_encode == "":
+        return JSONResponse(content={
+            'status': 2,
+            'message': "acc_encode is required"
+        })
+    return True
+
+def detect_n_emb_face(data):
+    try:
+        contents = data.img_base64
+        contents = base64.b64decode(contents)
+        img_decode = cv2.imdecode(np.frombuffer(contents, np.uint8), -1)
+        boxes, scores, classIds, kpts = YOLOv8_face_detector.detect(img_decode)
+    except Exception as e:
+        del img_decode, contents
+        gc.collect()
+        return False,JSONResponse(content={
+            'status': 2,
+            'message': "Error when detecting face"
+        })
+    idx_large = np.argmax(scores)
+    box = boxes[idx_large]
+    x,y,w,h = box
+    x1, y1, x2, y2 = int(x), int(y), int(x+w), int(y+h)
+    # mở rộng khuôn mặt ra 5px 
+    x1 = x1 - 10 if x1 - 10 > 0 else 0
+    y1 = y1 - 10 if y1 - 10 > 0 else 0
+    x2 = x2 + 10 if x2 + 10 < img_decode.shape[1] else img_decode.shape[1]
+    y2 = y2 + 10 if y2 + 10 < img_decode.shape[0] else img_decode.shape[0]
+    
+    face = img_decode[y1:y2, x1:x2]
+    face = face.astype('uint8')
+    face = adjust_gamma(face, gamma=1.5)
+
+    try:
+        emb = get_embedding(face)
+    except Exception as e:
+        del face, img_decode
+        gc.collect()
+        return False,JSONResponse(content={
+            'status': 2,
+            'message': "Error when encoding face"
+        })
+    return True, (emb, img_decode)
 
 @app.get("/",
         responses={
@@ -152,63 +256,21 @@ async def check_connection():
             })
 async def face_recog_img_base64(data: FaceRecog):
     
-    if len(data.img_base64) == 0:
-        return JSONResponse(content={
-            'status': 2,
-            'message': "img_base64 is required"
-        })
+    check_condition_face = check_condition(data, is_checkin=True)
+    if check_condition_face != True:
+        return check_condition_face
     
     if data.role == '1':
         collection_name='Employees'
     elif data.role == '0':
         collection_name='Customers'
-    else:
-        return JSONResponse(content={
-            'status': 2,
-            'message': "role is 0 or 1"
-        })
+
+    check_emb, message = detect_n_emb_face(data)
+    if check_emb == False:
+        return message
     
-    try:
-        contents = data.img_base64
-        contents = base64.b64decode(contents)
-        img_decode = cv2.imdecode(np.frombuffer(contents, np.uint8), -1)
-        # img_decode = cv2.resize(img_decode, (0,0), fx=0.5, fy=0.5)
-        # print(datetime.datetime.now())
-        boxes, scores, classIds, kpts = YOLOv8_face_detector.detect(img_decode)
-        # print(datetime.datetime.now())
-    except Exception as e:
-        del img_decode, contents
-        gc.collect()
-        return JSONResponse(content={
-            'status': 2,
-            'message': "Error when detecting face"
-        })
-    idx_large = np.argmax(scores)
-    box = boxes[idx_large]
-    x,y,w,h = box
-    x1, y1, x2, y2 = int(x), int(y), int(x+w), int(y+h)
-    # mở rộng khuôn mặt ra 5px 
-    x1 = x1 - 10 if x1 - 10 > 0 else 0
-    y1 = y1 - 10 if y1 - 10 > 0 else 0
-    x2 = x2 + 10 if x2 + 10 < img_decode.shape[1] else img_decode.shape[1]
-    y2 = y2 + 10 if y2 + 10 < img_decode.shape[0] else img_decode.shape[0]
+    emb, img_decode = message
     
-    face = img_decode[y1:y2, x1:x2]
-    face = face.astype('uint8')
-    face = adjust_gamma(face, gamma=1.5)
-    # cv2.imwrite('face_test/test.jpg', img_decode)
-    # cv2.imwrite('face_test/face_test.jpg', face)
-    try:
-        print(datetime.datetime.now())
-        emb = get_embedding(face)
-        print(datetime.datetime.now())
-    except Exception as e:
-        del face, img_decode
-        gc.collect()
-        return JSONResponse(content={
-            'status': 2,
-            'message': "Error when encoding face"
-        })
     data_search = {
         "collection_name": collection_name,
         "vector_embedding": emb,
@@ -229,6 +291,7 @@ async def face_recog_img_base64(data: FaceRecog):
             'id': id,
             'name': name,
         })
+    save_face_image(data, img_decode, id, name)
     del search_db, emb, face, img_decode
     gc.collect()
     return JSONResponse(content={
@@ -267,64 +330,22 @@ async def create_face_img_base64(data: CreateFace):
     """
     id = data.id
     name = data.name
-    role = data.role
-    if id is None or name is None:
-        return JSONResponse(content={
-            'status': 2,
-            'message': "id and name are required"
-        })
-        
-    if len(data.img_base64) == 0:
-        return JSONResponse(content={
-            'status': 2,
-            'message': "img_base64 is required"
-        })
-    if role == '1':
+    
+    check_condition_face = check_condition(data, is_checkin=False)
+    if check_condition_face != True:
+        return check_condition_face
+
+    if data.role == '1':
         collection_name='Employees'
-    elif role == '0':
+    elif data.role == '0':
         collection_name='Customers'
-    else:
-        return JSONResponse(content={
-            'status': 2,
-            'message': "role is 0 or 1"
-        })
-    try:
-        contents = data.img_base64
-        contents = base64.b64decode(contents)
-        img_decode = cv2.imdecode(np.frombuffer(contents, np.uint8), -1)
-        # img_decode = cv2.resize(img_decode, (0,0), fx=0.5, fy=0.5)
-        boxes, scores, classIds, kpts = YOLOv8_face_detector.detect(img_decode)
-    except Exception as e:
-        # qd.close()
-        return JSONResponse(content={
-            'status': 2,
-            'message': "Error when detecting face"
-        })
-    idx_large = np.argmax(scores)
-    box = boxes[idx_large]
-    x,y,w,h = box
-    x1, y1, x2, y2 = int(x), int(y), int(x+w), int(y+h)
     
-    x1 = x1 - 10 if x1 - 10 > 0 else 0
-    y1 = y1 - 10 if y1 - 10 > 0 else 0
-    x2 = x2 + 10 if x2 + 10 < img_decode.shape[1] else img_decode.shape[1]
-    y2 = y2 + 10 if y2 + 10 < img_decode.shape[0] else img_decode.shape[0]
+    check_emb, message = detect_n_emb_face(data)
+    if check_emb == False:
+        return message
     
-    face = img_decode[y1:y2, x1:x2]
-    face = face.astype('uint8')
-    face = adjust_gamma(face, gamma=1.5)
-    
-    # cv2.imwrite('face_test/test_cr.jpg', img_decode)
-    # cv2.imwrite('face_test/face_test_cr.jpg', face)
-    try:
-        emb = get_embedding(face)
-    except Exception as e:
-        # qd.close()
-        return JSONResponse(content={
-            'status': 2,
-            'message': "Error when encoding face"
-        })
-        
+    emb, img_decode = message
+
     # check if id is existed
     data_search = {
         "collection_name": collection_name,
@@ -349,6 +370,7 @@ async def create_face_img_base64(data: CreateFace):
             'status': 2,
             'message': "Error when insert face"
         })
+    save_face_image(data, img_decode, id, name, is_checkin=False)
     del search_db, emb, face, img_decode
     gc.collect()
     return JSONResponse(content={
@@ -356,175 +378,174 @@ async def create_face_img_base64(data: CreateFace):
         'message': f'Create face {name} with id {id} successfully'
     })
 
-@app.delete("/delete_employee_face", 
-            description="Delete face from database; id: ID of customer or id of employee; role: 1: Employee, 0: Customer", 
-            tags=["Face"],
-            responses={
-                200: {
-                    "description": "Successful Response",
-                    "content": {
-                        "application/json": {
-                            "example": {
-                                "status": "0, 1 or 2",
-                                "message": "message"
-                            }
-                        }
-                    }
-                }
-            })
-async def delete_employee_face(data: DeleteFace):
-    """
-    Delete a face from the database based on the provided ID and role.
+# @app.delete("/delete_employee_face", 
+#             description="Delete face from database; id: ID of customer or id of employee; role: 1: Employee, 0: Customer", 
+#             tags=["Face"],
+#             responses={
+#                 200: {
+#                     "description": "Successful Response",
+#                     "content": {
+#                         "application/json": {
+#                             "example": {
+#                                 "status": "0, 1 or 2",
+#                                 "message": "message"
+#                             }
+#                         }
+#                     }
+#                 }
+#             })
+# async def delete_employee_face(data: DeleteFace):
+#     """
+#     Delete a face from the database based on the provided ID and role.
 
-    Parameters:
-        data (DeleteFace): The data containing the ID and role of the face to be deleted.
+#     Parameters:
+#         data (DeleteFace): The data containing the ID and role of the face to be deleted.
 
-    Returns:
-        JSONResponse: The response containing the status and message of the deletion process.
-            - status (int): The status code of the response.
-            - message (str): The message indicating the result of the deletion process.
-    """
-    id = data.id
-    if id is None:
-        return JSONResponse(content={
-            'status': 2,
-            'message': "id is required"
-        })
+#     Returns:
+#         JSONResponse: The response containing the status and message of the deletion process.
+#             - status (int): The status code of the response.
+#             - message (str): The message indicating the result of the deletion process.
+#     """
+#     id = data.id
+#     if id is None:
+#         return JSONResponse(content={
+#             'status': 2,
+#             'message': "id is required"
+#         })
 
-    data_delete = {
-        "collection_name": "Employees",
-        "id": id,
-    }
-    # print(data_delete)
-    check = requests.delete(URL_DELETE, json=data_delete)
-    if check.status_code != 200:
-        return JSONResponse(content={
-            'status': 0,
-            'message': "Not found employee with id {id}"
-        })
-    del data_delete
-    gc.collect()
-    return JSONResponse(content={
-        'status': 1,
-        'message': f'Delete face with id {id} successfully'
-    })
+#     data_delete = {
+#         "collection_name": "Employees",
+#         "id": id,
+#     }
+#     # print(data_delete)
+#     check = requests.delete(URL_DELETE, json=data_delete)
+#     if check.status_code != 200:
+#         return JSONResponse(content={
+#             'status': 0,
+#             'message': "Not found employee with id {id}"
+#         })
+#     del data_delete
+#     gc.collect()
+#     return JSONResponse(content={
+#         'status': 1,
+#         'message': f'Delete face with id {id} successfully'
+#     })
 
 # update face
-@app.put("/update_face_img_base64", 
-            description="Update face from image base64; id: ID of customer or id of employee; name: Name of customer or id of employee",
-            tags=["Face"],
-            responses={
-                200: {
-                    "description": "Successful Response",
-                    "content": {
-                        "application/json": {
-                            "example": {
-                                "status": "0, 1 or 2",
-                                "message": "message"
-                            }
-                        }
-                    }
-                }
-            }
-        )
-async def update_face_img_base64(data: CreateFace):
-    """
-    Update a face from an image base64.
+# @app.put("/update_face_img_base64", 
+#             description="Update face from image base64; id: ID of customer or id of employee; name: Name of customer or id of employee",
+#             tags=["Face"],
+#             responses={
+#                 200: {
+#                     "description": "Successful Response",
+#                     "content": {
+#                         "application/json": {
+#                             "example": {
+#                                 "status": "0, 1 or 2",
+#                                 "message": "message"
+#                             }
+#                         }
+#                     }
+#                 }
+#             }
+#         )
 
-    Parameters:
-        - data (CreateFace): The data containing the image base64, id, name, and role.
+# async def update_face_img_base64(data: CreateFace):
+#     """
+#     Update a face from an image base64.
 
-    Returns:
-        - JSONResponse: The response containing the status and message of the face update process.
-            - status (int): The status code of the response.
-            - message (str): The message indicating the result of the face update process.
-    """
-    id = data.id
-    name = data.name
-    role = data.role
-    if id is None or name is None:
-        return JSONResponse(content={
-            'status': 2,
-            'message': "id and name are required"
-        })
+#     Parameters:
+#         - data (CreateFace): The data containing the image base64, id, name, and role.
+
+#     Returns:
+#         - JSONResponse: The response containing the status and message of the face update process.
+#             - status (int): The status code of the response.
+#             - message (str): The message indicating the result of the face update process.
+#     """
+#     id = data.id
+#     name = data.name
+#     role = data.role
+#     if id is None or name is None:
+#         return JSONResponse(content={
+#             'status': 2,
+#             'message': "id and name are required"
+#         })
         
-    if len(data.img_base64) == 0:
-        return JSONResponse(content={
-            'status': 2,
-            'message': "img_base64 is required"
-        })
+#     if len(data.img_base64) == 0:
+#         return JSONResponse(content={
+#             'status': 2,
+#             'message': "img_base64 is required"
+#         })
     
-    if role == '1':
-        collection_name='Employees'
-    elif role == '0':
-        collection_name='Customers'
-    else:
-        return JSONResponse(content={
-            'status': 2,
-            'message': "role is 0 or 1"
-        })
-    try:
-        contents = data.img_base64
-        contents = base64.b64decode(contents)
-        img_decode = cv2.imdecode(np.frombuffer(contents, np.uint8), -1)
-        img_decode = cv2.resize(img_decode, (0,0), fx=0.5, fy=0.5)
-        boxes, scores, classIds, kpts = YOLOv8_face_detector.detect(img_decode)
-    except Exception as e:
-        # qd.close()
-        del img_decode
-        gc.collect()
-        return JSONResponse(content={
-            'status': 2,
-            'message': "Error when detecting face"
-        })
-    idx_large = np.argmax(scores)
-    box = boxes[idx_large]
-    x,y,w,h = box
-    x1, y1, x2, y2 = int(x), int(y), int(x+w), int(y+h)
-    face = img_decode[y1:y2, x1:x2]
-    face = face.astype('uint8')
-    try:
-        emb = get_embedding(face)
-    except Exception as e:
-        # qd.close()
-        del face, img_decode
-        gc.collect()
-        return JSONResponse(content={
-            'status': 2,
-            'message': "Error when encoding face"
-        })
+#     if role == '1':
+#         collection_name='Employees'
+#     elif role == '0':
+#         collection_name='Customers'
+#     else:
+#         return JSONResponse(content={
+#             'status': 2,
+#             'message': "role is 0 or 1"
+#         })
+#     try:
+#         contents = data.img_base64
+#         contents = base64.b64decode(contents)
+#         img_decode = cv2.imdecode(np.frombuffer(contents, np.uint8), -1)
+#         img_decode = cv2.resize(img_decode, (0,0), fx=0.5, fy=0.5)
+#         boxes, scores, classIds, kpts = YOLOv8_face_detector.detect(img_decode)
+#     except Exception as e:
+#         del img_decode
+#         gc.collect()
+#         return JSONResponse(content={
+#             'status': 2,
+#             'message': "Error when detecting face"
+#         })
+#     idx_large = np.argmax(scores)
+#     box = boxes[idx_large]
+#     x,y,w,h = box
+#     x1, y1, x2, y2 = int(x), int(y), int(x+w), int(y+h)
+#     face = img_decode[y1:y2, x1:x2]
+#     face = face.astype('uint8')
+#     try:
+#         emb = get_embedding(face)
+#     except Exception as e:
+#         del face, img_decode
+#         gc.collect()
+#         return JSONResponse(content={
+#             'status': 2,
+#             'message': "Error when encoding face"
+#         })
         
-    # check if id is existed
-    data_search = {
-        "collection_name": collection_name,
-        "vector_embedding": emb,
-    }
-    search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
-    search_db = search_db[0] if len(search_db) > 0 else []
-    if len(search_db) == 0:
-        return JSONResponse(content={
-            'status': 0,
-            'message': f'id {id} is not existed'
-        })
-    data_insert = {
-            "collection_name": collection_name,
-            "vector_embedding": emb,
-            "id": id,
-            "name": name,
-            "is_update_id": "true"
-        }
-    check = requests.post(URL_INSERT, json=data_insert)
-    if check.status_code != 201:
-        return JSONResponse(content={
-            'status': 2,
-            'message': "Error when insert face"
-        })
-    del search_db, emb, face, img_decode
-    gc.collect()
-    return JSONResponse(content={
-        'status': 1,
-        'message': f'Update face {name} with id {id} successfully'
-    })
+#     # check if id is existed
+#     data_search = {
+#         "collection_name": collection_name,
+#         "vector_embedding": emb,
+#     }
+#     search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
+#     search_db = search_db[0] if len(search_db) > 0 else []
+#     if len(search_db) == 0:
+#         return JSONResponse(content={
+#             'status': 0,
+#             'message': f'id {id} is not existed'
+#         })
+#     data_insert = {
+#             "collection_name": collection_name,
+#             "vector_embedding": emb,
+#             "id": id,
+#             "name": name,
+#             "is_update_id": "true"
+#         }
+#     check = requests.post(URL_INSERT, json=data_insert)
+#     if check.status_code != 201:
+#         return JSONResponse(content={
+#             'status': 2,
+#             'message': "Error when insert face"
+#         })
+#     del search_db, emb, face, img_decode
+#     gc.collect()
+#     return JSONResponse(content={
+#         'status': 1,
+#         'message': f'Update face {name} with id {id} successfully'
+#     })
 
 @app.get("/backup_db",
             tags=["Database"]
@@ -573,7 +594,6 @@ async def backup_db(background_tasks: BackgroundTasks):
                         }
                     }
                 }
-            
             })
 async def recover_db(file: UploadFile = File(..., description="File backup")):
     try:

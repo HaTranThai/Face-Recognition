@@ -84,10 +84,6 @@ def _get_points(collection_name, id):
 async def root():
     return {"message": "Hello World"}
 
-# @app.get("/checkGPU")
-# async def checkGPU():
-#     return {"message": torch.cuda.is_available(), "version": torch.__version__}
-
 @app.get("/get_collections", tags=["Colection"])
 async def get_collections():
     return {
