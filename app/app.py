@@ -243,7 +243,7 @@ async def search_point(data: SearchPoint):
         return JSONResponse(status_code=404, content={"message": "Embedding not found or invalid!"})
     
     try:
-        result = client.search(collection_name=collection_name, query_vector=vector_embedding, limit=2, query_filter = models.Filter(
+        result = client.search(collection_name=collection_name, query_vector=vector_embedding, limit=1, query_filter = models.Filter(
             must=[
                 models.FieldCondition(
                     key="store_id",
