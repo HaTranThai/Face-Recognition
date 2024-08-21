@@ -43,11 +43,13 @@ class InsertPoint(BaseModel):
     vector_embedding: Union[List[int], List[float]] = None
     id: Union[str, None] = ""
     name: Union[str, None] = ""
+    store_id: Union[str, None] = ""
     is_update_id: Union[bool, None] = False
 
 class SearchPoint(BaseModel):
     collection_name: Union[str, None] = ""
     vector_embedding: Union[List[int], List[float]] = None
+    store_id: Union[str, None] = ""
 
 class DeleteCollection(BaseModel):
     collection_name: Union[str, None] = ""
@@ -84,10 +86,6 @@ def _get_points(collection_name, id):
 async def root():
     return {"message": "Hello World"}
 
-# @app.get("/checkGPU")
-# async def checkGPU():
-#     return {"message": torch.cuda.is_available(), "version": torch.__version__}
-
 @app.get("/get_collections", tags=["Colection"])
 async def get_collections():
     return {
@@ -103,7 +101,7 @@ async def create_collection(data:CreateCollection):
     if not _check_exist(collection_name):
         client.create_collection(
             collection_name=collection_name,
-            vectors_config=VectorParams(size=512, distance=Distance.COSINE)
+            vectors_config=VectorParams(size=4096, distance=Distance.COSINE)
             )
         return JSONResponse(status_code=201, content={"message": "Collection created"})
     else:
@@ -160,7 +158,7 @@ async def recover_snapshot(data: RecoverSnapshot):
         if not _check_exist(collection_name):
             client.create_collection(
                 collection_name=collection_name,
-                vectors_config=VectorParams(size=512, distance=Distance.COSINE)
+                vectors_config=VectorParams(size=4096, distance=Distance.COSINE)
                 )
         client.recover_snapshot(
             collection_name=collection_name, location=f"file:///qdrant/snapshots/{path_snapshot}"
@@ -185,6 +183,7 @@ async def insert_point(data:InsertPoint):
     embedding = data.vector_embedding
     id = data.id
     name = data.name
+    store_id = data.store_id
     is_update_id = data.is_update_id
     time_created = datetime.datetime.now().strftime("%Y/%m/%d")
     
@@ -194,7 +193,7 @@ async def insert_point(data:InsertPoint):
     if not _check_exist(collection_name):
         return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
     
-    if embedding is None or len(embedding) != 512:
+    if embedding is None or len(embedding) != 4096:
         return JSONResponse(status_code=404, content={"message": "Embedding not found or invalid!"})
     
     if id is None or id == "":
@@ -206,6 +205,7 @@ async def insert_point(data:InsertPoint):
     payload = {
         'id': id,
         'name': name,
+        "store_id": store_id,
         'time_created': time_created
     }
     
@@ -231,7 +231,7 @@ async def insert_point(data:InsertPoint):
 async def search_point(data: SearchPoint):
     collection_name = data.collection_name
     vector_embedding = data.vector_embedding
-
+    store_id = data.store_id
     if collection_name is None or collection_name == "":
         return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
     
@@ -239,11 +239,18 @@ async def search_point(data: SearchPoint):
         return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
     
     # if vector_embedding is None or len(vector_embedding) != 128 or not all(isinstance(i, (int, float)) for i in vector_embedding) or not all(-1 <= i <= 1 for i in vector_embedding):
-    if vector_embedding is None or len(vector_embedding) != 512:
+    if vector_embedding is None or len(vector_embedding) != 4096:
         return JSONResponse(status_code=404, content={"message": "Embedding not found or invalid!"})
     
     try:
-        result = client.search(collection_name=collection_name, query_vector=vector_embedding, limit=1)
+        result = client.search(collection_name=collection_name, query_vector=vector_embedding, limit=1, query_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="store_id",
+                    match=models.MatchValue(value=store_id)
+                )
+            ]
+        ))
         print([(i.score, i.payload) for i in result])
         return JSONResponse(status_code=200, content={"message": "Point found", "data": [(i.score, i.payload) for i in result if i.score >= 0.72]})
     except Exception as e:

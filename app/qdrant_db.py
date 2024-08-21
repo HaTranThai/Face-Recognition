@@ -4,7 +4,7 @@ from uuid import uuid4
 import pandas as pd
 
 class QDrantDB:
-    def __init__(self, path:str='qdrant_db', collection_name:str='face_128', embedding_size:int=512, distance=Distance.COSINE):
+    def __init__(self, path:str='qdrant_db', collection_name:str='face_128', embedding_size:int=4096, distance=Distance.COSINE):
         self.path = path
         self.client = QdrantClient(path=path)
         self.embedding_size = embedding_size

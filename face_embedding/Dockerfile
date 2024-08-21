@@ -1,9 +1,14 @@
-FROM python:3.8
+FROM python:3.9
 
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 RUN python3 -m pip install --upgrade pip
-RUN apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
+ENV DEBIAN_FRONTEND noninteractive
+RUN apt-get update -y
+RUN apt install libgl1-mesa-glx -y
+RUN apt-get install 'ffmpeg'\
+    'libsm6'\
+    'libxext6'  -y
 RUN pip3 install opencv-python
 RUN pip3 install tensorflow==2.13.0
 RUN pip3 install deepface
@@ -15,8 +20,6 @@ RUN pip3 install fastapi
 RUN pip3 install uvicorn
 RUN pip3 install requests
 RUN pip3 install python-multipart
-# RUN mkdir -p /root/.deepface/weights
-# RUN wget -O /root/.deepface/weights/arcface_weights.h5 https://github.com/serengil/deepface_models/releases/download/v1.0/arcface_weights.h5
 
 EXPOSE 2024
 
