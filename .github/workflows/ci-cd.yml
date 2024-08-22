@@ -62,28 +62,28 @@ jobs:
       - name: Build and push multi-container app using docker-compose
         run: docker-compose -f docker-compose.yml build
   
-  deploy_staging:
-    if: github.ref == 'refs/heads/staging_cloud'
-    # needs: build
-    runs-on: ubuntu-latest
+  # deploy_staging:
+  #   if: github.ref == 'refs/heads/staging_cloud'
+  #   # needs: build
+  #   runs-on: ubuntu-latest
 
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v2
 
-    - name: Deploy to remote server
-      uses: appleboy/ssh-action@v0.1.6
-      with:
-        host: ${{ secrets.REMOTE_CLOUD_HOST }}
-        username: ${{ secrets.REMOTE_CLOUD_USER }}
-        key: ${{ secrets.SSH_CLOUD_PRIVATE_KEY }}
-        script: |
-          export PATH=$PATH:/home/bbsw/.local/bin
-          export PYTHONPATH=$PYTHONPATH:/home/bbsw/.local/lib/python3.6/site-packages
-          cd /home/administrator/BBSW/Face_Recognition_JetNano
-          git pull https://${{ secrets.PASSWORD_TOKEN_GITHUB }}@github.com/${{ secrets.LINK_PROJECT }} staging_cloud
-          docker-compose down
-          docker-compose up -d --build
+  #   - name: Deploy to remote server
+  #     uses: appleboy/ssh-action@v0.1.6
+  #     with:
+  #       host: ${{ secrets.REMOTE_CLOUD_HOST }}
+  #       username: ${{ secrets.REMOTE_CLOUD_USER }}
+  #       key: ${{ secrets.SSH_CLOUD_PRIVATE_KEY }}
+  #       script: |
+  #         export PATH=$PATH:/home/bbsw/.local/bin
+  #         export PYTHONPATH=$PYTHONPATH:/home/bbsw/.local/lib/python3.6/site-packages
+  #         cd /home/administrator/BBSW/Face_Recognition_JetNano
+  #         git pull https://${{ secrets.PASSWORD_TOKEN_GITHUB }}@github.com/${{ secrets.LINK_PROJECT }} staging_cloud
+  #         docker-compose down
+  #         docker-compose up -d --build
 
   # deploy_production:
   #   if: github.ref == 'refs/heads/main'

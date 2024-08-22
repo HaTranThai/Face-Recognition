@@ -44,8 +44,10 @@ ip_private = f'http://{FastDB_HOST}:{FastDB_PORT}'
 URL_SEARCH = f'{ip_private}/search_point'
 URL_INSERT = f'{ip_private}/insert_point'
 URL_DELETE = f'{ip_private}/delete_point'
-URL_RECOVER = f'{ip_private}/recover_snapshot'
-URL_CREATE = f'{ip_private}/create_snapshot'
+URL_RECOVER_SNAP = f'{ip_private}/recover_snapshot'
+URL_CREATE_SNAP = f'{ip_private}/create_snapshot'
+URL_GET_CLT = f'{ip_private}/get_collections'
+URL_CRE_CLT = f'{ip_private}/create_collection'
 
 
 # set quyền truy cập cho API
@@ -145,7 +147,6 @@ def check_condition(data, is_checkin=True):
             'status': 2,
             'message': "store_id is required"
         })
-
     return True
 
 def detect_n_emb_face(data):
@@ -186,6 +187,25 @@ def detect_n_emb_face(data):
         })
     return True, (emb, img_decode)
 
+def cnc_clt_exist(store_id):
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    check_clt = requests.get(URL_GET_CLT, headers=headers).json()['collections']
+    if f"{store_id}_Employees" not in check_clt and f"{store_id}_Customers" not in check_clt:
+        print("Create collection")
+        data_cus = {
+            "collection_name": f"{store_id}_Customers"
+        }
+        data_emp = {
+            "collection_name": f"{store_id}_Employees"
+        }
+        result_cus = requests.post(URL_CRE_CLT, json=data_cus)
+        result_emp = requests.post(URL_CRE_CLT, json=data_emp)
+        if result_cus.status_code != 201 or result_emp.status_code != 201:
+            return False
+    return True
+
 @app.get("/",
         responses={
                 200: {
@@ -200,7 +220,12 @@ def detect_n_emb_face(data):
                 }
         })
 async def root():
-    return {"message": "Hello World"}
+    # return {"message": "Hello World"}
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    check = requests.get(URL_GET_CLT, headers=headers)
+    return check.json()
 
 @app.get("/check_connection", description="Check connection")
 async def check_connection():
@@ -250,9 +275,9 @@ async def face_recog_img_base64(data: FaceRecog):
         return check_condition_face
     
     if data.role == '1':
-        collection_name='Employees'
+        collection_name=f'{data.store_id}_Employees'
     elif data.role == '0':
-        collection_name='Customers'
+        collection_name=f'{data.store_id}_Customers'
 
     check_emb, message = detect_n_emb_face(data)
     if check_emb == False:
@@ -260,12 +285,18 @@ async def face_recog_img_base64(data: FaceRecog):
     
     emb, img_decode = message
     
+    result_cnc_clt = cnc_clt_exist(data.store_id)
+    if result_cnc_clt == False:
+        return JSONResponse(content={
+            'status': 2,
+            'message': "Error when create collection"
+        })
     data_search = {
         "collection_name": collection_name,
         "vector_embedding": emb,
         "store_id": data.store_id
     }
-    # print(requests.post(URL_SEARCH, json=data_search).json())
+    print(requests.post(URL_SEARCH, json=data_search).json())
     search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
     search_db = search_db[0] if len(search_db) > 0 else []
     name = search_db[1]['name'] if len(search_db) > 0 else "Unknown"
@@ -326,9 +357,9 @@ async def create_face_img_base64(data: CreateFace):
         return check_condition_face
 
     if data.role == '1':
-        collection_name='Employees'
+        collection_name=f'{store_id}_Employees'
     elif data.role == '0':
-        collection_name='Customers'
+        collection_name=f'{store_id}_Customers'
     
     check_emb, message = detect_n_emb_face(data)
     if check_emb == False:
@@ -336,6 +367,13 @@ async def create_face_img_base64(data: CreateFace):
     
     emb, img_decode = message
 
+    result_cnc_clt = cnc_clt_exist(data.store_id)
+    if result_cnc_clt == False:
+        return JSONResponse(content={
+            'status': 2,
+            'message': "Error when create collection"
+        })
+    
     # check if id is existed
     data_search = {
         "collection_name": collection_name,
@@ -539,13 +577,12 @@ async def create_face_img_base64(data: CreateFace):
 #         'status': 1,
 #         'message': f'Update face {name} with id {id} successfully'
 #     })
-
 @app.get("/backup_db",
             tags=["Database"]
         )
-async def backup_db(background_tasks: BackgroundTasks):
-    file_path_customer = './snapshots/Customers'
-    file_path_employee = './snapshots/Employees'
+async def backup_db(store_id,background_tasks: BackgroundTasks):
+    file_path_customer = f'./snapshots/{store_id}_Customers'
+    file_path_employee = f'./snapshots/{store_id}_Employees'
     if not os.path.exists(file_path_customer) or not os.path.exists(file_path_employee):
         return JSONResponse(content={
             'status': 0,
@@ -553,11 +590,11 @@ async def backup_db(background_tasks: BackgroundTasks):
         })
     try:
         for collection_name in ['Employees', 'Customers']:
-            result = requests.get(URL_CREATE+f"/{collection_name}")
+            result = requests.get(URL_CREATE_SNAP+f"/{collection_name}")
     except Exception as e:
         pass
     time_save = datetime.datetime.now().strftime("%Y_%m_%d")
-    zipfile_name = f'snapshots_{time_save}.zip'
+    zipfile_name = f'snapshots_{store_id}_{time_save}.zip'
     try:
         with zipfile.ZipFile(f'./{zipfile_name}', 'w') as zip_file:
             for folder_name in [file_path_customer, file_path_employee]:
@@ -566,6 +603,54 @@ async def backup_db(background_tasks: BackgroundTasks):
                         file_path = os.path.join(root, file)
                         arcname = os.path.relpath(file_path, os.path.join(folder_name, '..'))
                         zip_file.write(file_path, arcname)
+        background_tasks.add_task(os.remove, f'./{zipfile_name}')
+        return FileResponse(f'./{zipfile_name}', media_type='application/zip', filename=zipfile_name)
+    except Exception as e:
+        return JSONResponse(content={
+            'status': 2,
+            'message': str(e)
+        })
+@app.get("/backup_all_db",
+            tags=["Database"]
+        )
+async def backup_all_db(background_tasks: BackgroundTasks):
+    headers = {
+        'Content-Type': 'application/json',
+    }
+    clts = requests.get(URL_GET_CLT, headers=headers).json()['collections']
+    
+    files_path_customer=[]
+    files_path_employee=[]
+    
+    for clt in clts:
+        if clt.endswith('Customers'):
+            files_path_customer.append(clt)
+        elif clt.endswith('Employees'):
+            files_path_employee.append(clt)
+    for file_path_customer, file_path_employee in zip(files_path_customer, files_path_employee):
+        if not os.path.exists("./snapshots/"+file_path_customer) or not os.path.exists("./snapshots/"+file_path_employee):
+            return JSONResponse(content={
+                'status': 0,
+                'message': "Not found snapshot"
+            })
+    
+    try:
+        for clt_name_cus, clt_name_emp in zip(files_path_customer, files_path_employee):
+            result_cus = requests.get(URL_CREATE_SNAP+f"/{clt_name_cus}")
+            result_emp = requests.get(URL_CREATE_SNAP+f"/{clt_name_emp}")
+    except Exception as e:
+        pass
+    time_save = datetime.datetime.now().strftime("%Y_%m_%d")
+    zipfile_name = f'snapshots_{time_save}.zip'
+    try:
+        with zipfile.ZipFile(f'./{zipfile_name}', 'w') as zip_file:
+            for file_path_customer, file_path_employee in zip(files_path_customer, files_path_employee):
+                for folder_name in ["./snapshots/"+file_path_customer, "./snapshots/"+file_path_employee]:
+                    for root, dirs, files in os.walk(folder_name):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            arcname = os.path.relpath(file_path, os.path.join(folder_name, '..'))
+                            zip_file.write(file_path, arcname)
         background_tasks.add_task(os.remove, f'./{zipfile_name}')
         return FileResponse(f'./{zipfile_name}', media_type='application/zip', filename=zipfile_name)
     except Exception as e:
@@ -612,15 +697,15 @@ async def recover_db(file: UploadFile = File(..., description="File backup")):
             for name in files:
                 extracted_files.append(os.path.join(root, name))
         for folder in folders:
-            print(folder)
+            # print(folder)
             for snapshot_name in os.listdir(os.path.join(extract_dir, folder)):
                 if snapshot_name.endswith('.snapshot'):
-                    print(os.path.join(extract_name, folder, snapshot_name))
+                    # print(os.path.join(extract_name, folder, snapshot_name))
                     json_post = {
                         "collection_name": folder,
                         "snapshot_name": os.path.join(extract_name, folder, snapshot_name)
                         }
-                    check = requests.post(URL_RECOVER, json=json_post)
+                    check = requests.post(URL_RECOVER_SNAP, json=json_post)
                     
                     if check.status_code != 200:
                         return JSONResponse(content={
