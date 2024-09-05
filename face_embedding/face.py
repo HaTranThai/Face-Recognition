@@ -436,6 +436,7 @@ async def delete_employee_face(data: DeleteFace):
             - message (str): The message indicating the result of the deletion process.
     """
     id_em = data.id
+    store_id = data.store_id
     if id_em is None:
         return JSONResponse(content={
             'status': 2,
@@ -443,7 +444,7 @@ async def delete_employee_face(data: DeleteFace):
         })
 
     data_delete = {
-        "collection_name": "Employees",
+        "collection_name": f"{store_id}_Employees",
         "id": id_em,
     }
     # print(data_delete)
