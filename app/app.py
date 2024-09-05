@@ -51,7 +51,7 @@ class SearchPoint(BaseModel):
     vector_embedding: Union[List[int], List[float]] = None
     store_id: Union[str, None] = ""
 
-class DeleteCollection(BaseModel):
+class DeletePoint(BaseModel):
     collection_name: Union[str, None] = ""
     id: Union[str, None] = ""
     
@@ -270,7 +270,7 @@ async def delete_collection(data: CreateCollection):
         return JSONResponse(status_code=404, content={"message": str(e)})
 
 @app.delete("/delete_point", tags=["Point"])
-async def delete_point(data: DeleteCollection):
+async def delete_point(data: DeletePoint):
     collection_name = data.collection_name
     id = data.id
     if collection_name is None or collection_name == "":

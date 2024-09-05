@@ -313,8 +313,6 @@ async def face_recog_img_base64(data: FaceRecog):
             'name': name,
         })
     save_face_image(data, img_decode, id, name)
-    # del search_db, emb, face, img_decode
-    # gc.collect()
     return JSONResponse(content={
         'status': 1,
         'id': id,
@@ -409,58 +407,56 @@ async def create_face_img_base64(data: CreateFace):
         'message': f'Create face {name} with id {id} successfully'
     })
 
-# @app.delete("/delete_employee_face", 
-#             description="Delete face from database; id: ID of customer or id of employee; role: 1: Employee, 0: Customer", 
-#             tags=["Face"],
-#             responses={
-#                 200: {
-#                     "description": "Successful Response",
-#                     "content": {
-#                         "application/json": {
-#                             "example": {
-#                                 "status": "0, 1 or 2",
-#                                 "message": "message"
-#                             }
-#                         }
-#                     }
-#                 }
-#             })
-# async def delete_employee_face(data: DeleteFace):
-#     """
-#     Delete a face from the database based on the provided ID and role.
+@app.delete("/delete_employee_face", 
+            description="Delete face from database; id: ID of customer or id of employee; role: 1: Employee, 0: Customer", 
+            tags=["Face"],
+            responses={
+                200: {
+                    "description": "Successful Response",
+                    "content": {
+                        "application/json": {
+                            "example": {
+                                "status": "0, 1 or 2",
+                                "message": "message"
+                            }
+                        }
+                    }
+                }
+            })
+async def delete_employee_face(data: DeleteFace):
+    """
+    Delete a face from the database based on the provided ID and role.
 
-#     Parameters:
-#         data (DeleteFace): The data containing the ID and role of the face to be deleted.
+    Parameters:
+        data (DeleteFace): The data containing the ID and role of the face to be deleted.
 
-#     Returns:
-#         JSONResponse: The response containing the status and message of the deletion process.
-#             - status (int): The status code of the response.
-#             - message (str): The message indicating the result of the deletion process.
-#     """
-#     id = data.id
-#     if id is None:
-#         return JSONResponse(content={
-#             'status': 2,
-#             'message': "id is required"
-#         })
+    Returns:
+        JSONResponse: The response containing the status and message of the deletion process.
+            - status (int): The status code of the response.
+            - message (str): The message indicating the result of the deletion process.
+    """
+    id_em = data.id
+    if id_em is None:
+        return JSONResponse(content={
+            'status': 2,
+            'message': "id is required"
+        })
 
-#     data_delete = {
-#         "collection_name": "Employees",
-#         "id": id,
-#     }
-#     # print(data_delete)
-#     check = requests.delete(URL_DELETE, json=data_delete)
-#     if check.status_code != 200:
-#         return JSONResponse(content={
-#             'status': 0,
-#             'message': "Not found employee with id {id}"
-#         })
-#     del data_delete
-#     gc.collect()
-#     return JSONResponse(content={
-#         'status': 1,
-#         'message': f'Delete face with id {id} successfully'
-#     })
+    data_delete = {
+        "collection_name": "Employees",
+        "id": id_em,
+    }
+    # print(data_delete)
+    check = requests.delete(URL_DELETE, json=data_delete)
+    if check.status_code != 200:
+        return JSONResponse(content={
+            'status': 0,
+            'message': "Not found employee with id {id_em}"
+        })
+    return JSONResponse(content={
+        'status': 1,
+        'message': f'Delete face with id {id_em} successfully'
+    })
 
 # update face
 # @app.put("/update_face_img_base64", 
