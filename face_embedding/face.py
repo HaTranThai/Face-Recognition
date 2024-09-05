@@ -220,12 +220,7 @@ def cnc_clt_exist(store_id):
                 }
         })
 async def root():
-    # return {"message": "Hello World"}
-    headers = {
-        'Content-Type': 'application/json',
-    }
-    check = requests.get(URL_GET_CLT, headers=headers)
-    return check.json()
+    return {"message": "Hello World"}
 
 @app.get("/check_connection", description="Check connection")
 async def check_connection():
@@ -401,7 +396,7 @@ async def create_face_img_base64(data: CreateFace):
         })
     save_face_image(data, img_decode, id, name, is_checkin=False)
     # del search_db, emb, face, img_decode
-    gc.collect()
+    # gc.collect()
     return JSONResponse(content={
         'status': 1,
         'message': f'Create face {name} with id {id} successfully'
@@ -574,10 +569,10 @@ async def delete_employee_face(data: DeleteFace):
 #         'status': 1,
 #         'message': f'Update face {name} with id {id} successfully'
 #     })
-@app.get("/backup_db",
+@app.get("/backup_db_one",
             tags=["Database"]
         )
-async def backup_db(store_id,background_tasks: BackgroundTasks):
+async def backup_db_one(store_id,background_tasks: BackgroundTasks):
     file_path_customer = f'./snapshots/{store_id}_Customers'
     file_path_employee = f'./snapshots/{store_id}_Employees'
     if not os.path.exists(file_path_customer) or not os.path.exists(file_path_employee):

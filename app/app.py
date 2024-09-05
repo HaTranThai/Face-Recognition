@@ -28,7 +28,7 @@ tags_metadata = [
 ]
 # from qdrant_db import *
 # docs_url=None, redoc_url=None
-app = FastAPI(openapi_tags=tags_metadata) # gọi constructor và gán vào biến app
+app = FastAPI(openapi_tags=tags_metadata, docs_url=None, redoc_url=None)
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int( os.getenv("QDRANT_PORT", "6333"))
