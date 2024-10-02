@@ -252,7 +252,7 @@ async def search_point(data: SearchPoint):
             ]
         ))
         print([(i.score, i.payload) for i in result])
-        return JSONResponse(status_code=200, content={"message": "Point found", "data": [(i.score, i.payload) for i in result if i.score >= 0.72]})
+        return JSONResponse(status_code=200, content={"message": "Point found", "data": [(i.score, i.payload) for i in result if i.score >= 0.64]})
     except Exception as e:
         return JSONResponse(status_code=404, content={"message": str(e)})
 

@@ -12,6 +12,9 @@ RUN apt-get install 'ffmpeg'\
 RUN pip3 install opencv-python
 RUN pip3 install tensorflow==2.13.0
 RUN pip3 install deepface
+RUN pip3 install ultralytics
+RUN pip3 install mediapipe
+RUN pip3 install scipy
 
 WORKDIR /face_embedding
 COPY . /face_embedding

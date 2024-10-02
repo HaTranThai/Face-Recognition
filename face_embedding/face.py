@@ -5,9 +5,11 @@ from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from models.yolo import YOLOv8_face
 from pydantic import BaseModel
 from deepface import DeepFace
+from scipy.spatial import distance as dist
 
 import cv2
 import numpy as np
+import mediapipe as mp
 
 import requests
 import zipfile
@@ -23,6 +25,9 @@ confThreshold = 0.5
 nmsThreshold = 0.7
 YOLOv8_face_detector = YOLOv8_face(modelpath, conf_thres=confThreshold, iou_thres=nmsThreshold)
 
+# Khởi tạo Mediapipe
+mp_face_mesh = mp.solutions.face_mesh
+
 tags_metadata = [
     {
         "name": "Face",
@@ -35,7 +40,7 @@ tags_metadata = [
 ]
 
 # app = FastAPI(docs_url=None, redoc_url=None)
-app = FastAPI(openapi_tags=tags_metadata)
+app = FastAPI(title="FACE API", description="API for FACE", version="1.0" ,openapi_tags=tags_metadata)
 
 FastDB_HOST = os.getenv("FASTAPI_HOST", "localhost")
 FastDB_PORT = int( os.getenv("FASTAPI_PORT", "7005"))
@@ -49,6 +54,13 @@ URL_CREATE_SNAP = f'{ip_private}/create_snapshot'
 URL_GET_CLT = f'{ip_private}/get_collections'
 URL_CRE_CLT = f'{ip_private}/create_collection'
 
+KNOWN_FACE_WIDTH = 14.3  # centimeter
+# Indices của các điểm đặc trưng trên mắt trong Mediapipe Face Mesh
+LEFT_EYE_LANDMARKS = [33, 160, 158, 133, 153, 144]
+RIGHT_EYE_LANDMARKS = [362, 385, 387, 263, 373, 380]
+
+# Ngưỡng để xác định mắt đang nhắm
+EYE_AR_THRESH = 0.3
 
 # set quyền truy cập cho API
 #app.add_middleware(HTTPSRedirectMiddleware)
@@ -80,7 +92,7 @@ class FaceRecog(BaseModel):
     store_id: str = Query(None, description="ID cửa hàng")
 
 
-def get_embedding(imgf):
+def get_embedding(imgf,imgf_real):
     embedding_objs = DeepFace.represent(
         img_path = imgf,
         model_name= "VGG-Face",
@@ -89,7 +101,22 @@ def get_embedding(imgf):
         normalization = "VGGFace2",
         anti_spoofing = True,
     )
-    return embedding_objs[0]['embedding']
+    face_is_real = DeepFace.extract_faces(
+        img_path = imgf_real,
+        detector_backend = "yolov8",
+        align = True,
+        anti_spoofing = True,
+    )
+    # get confidence largest
+    index_confidence_face = 0
+    max_confidence = 0
+    # nmsThreshold = 0.7
+    if len(face_is_real) > 1:
+        for i in range(len(face_is_real)):
+            if face_is_real[i]['confidence'] > max_confidence:
+                max_confidence = face_is_real[i]['confidence']
+                index_confidence_face = i
+    return embedding_objs[0]['embedding'],face_is_real[index_confidence_face]["is_real"]
 
 def adjust_gamma(image, gamma=1.0):
     invGamma = 1.0 / gamma
@@ -121,7 +148,28 @@ def save_face_image(data, face,id,name,is_checkin=True):
     
     second_checkin = datetime.datetime.now().strftime("%H_%M_%S")
     cv2.imwrite(f'./{folder_save}/{data.store_id}/{time_checkin}/{id}_{name}_{second_checkin}.jpg', face)
-    
+
+def distance_face_to_camera(bbox_face, width_or):
+    xmin, ymin, xmax, ymax = bbox_face
+    P = xmax - xmin
+    Fmm = 4
+    width = width_or
+    F_pixel = (Fmm * width) / 4.8 # 4.8 is the width of the mobile phone camera sensor in mm
+    # F_pixel = focal_length_value
+    W_face = KNOWN_FACE_WIDTH
+    D = (W_face * F_pixel) / P
+    return D
+
+def eye_aspect_ratio(eye_landmarks, face_landmarks):
+    A = dist.euclidean([face_landmarks[eye_landmarks[1]].x, face_landmarks[eye_landmarks[1]].y],
+                       [face_landmarks[eye_landmarks[5]].x, face_landmarks[eye_landmarks[5]].y])
+    B = dist.euclidean([face_landmarks[eye_landmarks[2]].x, face_landmarks[eye_landmarks[2]].y],
+                       [face_landmarks[eye_landmarks[4]].x, face_landmarks[eye_landmarks[4]].y])
+    C = dist.euclidean([face_landmarks[eye_landmarks[0]].x, face_landmarks[eye_landmarks[0]].y],
+                       [face_landmarks[eye_landmarks[3]].x, face_landmarks[eye_landmarks[3]].y])
+    ear = (A + B) / (2.0 * C)
+    return ear
+
 def check_condition(data, is_checkin=True):
     if is_checkin == False:
         if data.id is None or data.name is None or data.id == "" or data.name == "":
@@ -149,11 +197,32 @@ def check_condition(data, is_checkin=True):
         })
     return True
 
+def check_eyes_open(img_decode):
+    with mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5) as face_mesh:
+        frame_rgb = cv2.cvtColor(img_decode, cv2.COLOR_BGR2RGB)
+        results = face_mesh.process(frame_rgb)
+
+        if results.multi_face_landmarks:
+            for face_landmarks in results.multi_face_landmarks:
+                left_ear = eye_aspect_ratio(LEFT_EYE_LANDMARKS, face_landmarks.landmark)
+                right_ear = eye_aspect_ratio(RIGHT_EYE_LANDMARKS, face_landmarks.landmark)
+                ear = (left_ear + right_ear) / 2.0
+                if ear < EYE_AR_THRESH:
+                    return False
+                else:
+                    return True
+
 def detect_n_emb_face(data):
     try:
         contents = data.img_base64
         contents = base64.b64decode(contents)
         img_decode = cv2.imdecode(np.frombuffer(contents, np.uint8), -1)
+        check_eyes = check_eyes_open(img_decode)
+        if check_eyes == False:
+            return False,JSONResponse(content={
+                'status': 2,
+                'message': "Eyes are closed"
+            })
         boxes, scores, classIds, kpts = YOLOv8_face_detector.detect(img_decode)
     except Exception as e:
         del img_decode, contents
@@ -166,18 +235,31 @@ def detect_n_emb_face(data):
     box = boxes[idx_large]
     x,y,w,h = box
     x1, y1, x2, y2 = int(x), int(y), int(x+w), int(y+h)
-    # mở rộng khuôn mặt ra 5px 
+    # mở rộng khuôn mặt ra 10px 
     x1 = x1 - 10 if x1 - 10 > 0 else 0
     y1 = y1 - 10 if y1 - 10 > 0 else 0
     x2 = x2 + 10 if x2 + 10 < img_decode.shape[1] else img_decode.shape[1]
     y2 = y2 + 10 if y2 + 10 < img_decode.shape[0] else img_decode.shape[0]
+    
+    distance = distance_face_to_camera((x1, y1, x2, y2), img_decode.shape[1])
+    
+    if distance < 20 or distance > 150:
+        return False,JSONResponse(content={
+            'status': 2,
+            'message': "Face is too close or too far"
+        })
     
     face = img_decode[y1:y2, x1:x2]
     face = face.astype('uint8')
     face = adjust_gamma(face, gamma=1.5)
 
     try:
-        emb = get_embedding(face)
+        emb,is_real = get_embedding(face, img_decode)
+        if is_real == False:
+            return False,JSONResponse(content={
+                'status': 2,
+                'message': "Face is not real"
+            })
     except Exception as e:
         del face, img_decode
         gc.collect()
@@ -225,11 +307,25 @@ async def root():
 @app.get("/check_connection", description="Check connection")
 async def check_connection():
     try:
-        image = cv2.imread('testface.jpg')
-        embedding = get_embedding(image)
-        del image, embedding
-        gc.collect()
-        return True
+        image = cv2.imread('face_fake_new.png')
+        
+        # img_path=img_path,
+        #     detector_backend=detector_backend,
+        #     grayscale=False,
+        #     enforce_detection=enforce_detection,
+        #     align=align,
+        #     expand_percentage=expand_percentage,
+        #     anti_spoofing=anti_spoofing,
+        #     max_faces=max_faces,
+        
+        face_is_real = DeepFace.extract_faces(
+            img_path = image,
+            detector_backend = "yolov8",
+            align = True,
+            anti_spoofing = True,
+        )
+        print(face_is_real)
+        return face_is_real[0]["is_real"]
     except Exception as e:
         print(e)
         return False
