@@ -160,6 +160,19 @@ def distance_face_to_camera(bbox_face, width_or):
     D = (W_face * F_pixel) / P
     return D
 
+def check_detect_blur(img, threshold=100):
+    # Đọc hình ảnh
+    image = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Tính toán biến thiên của Laplacian
+    laplacian_var = cv2.Laplacian(image, cv2.CV_64F).var()
+    
+    # Kiểm tra nếu giá trị biến thiên nhỏ hơn ngưỡng (threshold)
+    if laplacian_var < threshold:
+        return False
+    else:
+        return True
+
 def eye_aspect_ratio(eye_landmarks, face_landmarks):
     A = dist.euclidean([face_landmarks[eye_landmarks[1]].x, face_landmarks[eye_landmarks[1]].y],
                        [face_landmarks[eye_landmarks[5]].x, face_landmarks[eye_landmarks[5]].y])
@@ -251,6 +264,14 @@ def detect_n_emb_face(data):
     
     face = img_decode[y1:y2, x1:x2]
     face = face.astype('uint8')
+    
+    check_face_blur = check_detect_blur(face)
+    if check_face_blur == False:
+        return False,JSONResponse(content={
+            'status': 2,
+            'message': "Face is blur"
+        })
+    
     face = adjust_gamma(face, gamma=1.5)
 
     try:
