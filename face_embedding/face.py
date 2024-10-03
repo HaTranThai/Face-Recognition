@@ -10,7 +10,7 @@ from scipy.spatial import distance as dist
 import cv2
 import numpy as np
 import mediapipe as mp
-
+import math
 import requests
 import zipfile
 import os
@@ -224,17 +224,71 @@ def check_eyes_open(img_decode):
                     return False
                 else:
                     return True
+                
+def ConvertToPoint(landmark):
+    return [landmark.x, landmark.y, landmark.z]
+
+def CalcDistance(point1, point2):
+    x1, y1, z1 = ConvertToPoint(point1)
+    x2, y2, z2 = ConvertToPoint(point2)
+    distance = math.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+    return distance
+
+def DetectDirection(landmark):
+    left = CalcDistance(landmark[5], landmark[234])
+    right = CalcDistance(landmark[5], landmark[454])
+
+    threshold = 2.5
+    result = "straight"
+
+    if(left < right):
+        ratio = right / left
+        if(ratio > threshold):
+            result = "left"
+    elif(right < left):
+        ratio = left / right
+        if(ratio > threshold):
+            result = "right"
+    
+    return result
+
+def check_face_left_right(img_decode):
+    with mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5) as face_mesh:
+        results = face_mesh.process(cv2.cvtColor(img_decode, cv2.COLOR_BGR2RGB))
+        if not results.multi_face_landmarks:
+            return False, "Face not detected"
+
+        landmarks = results.multi_face_landmarks
+        if(len(landmarks) == 0):
+            return False, "Face not detected"
+        landmark = landmarks[0].landmark    
+        direction = DetectDirection(landmark)
+        
+        if direction == "left":
+            return False, "Face is looking left! Please look straight"
+        elif direction == "right":
+            return False, "Face is looking right! Please look straight"
+        else:
+            return True, "Face is looking straight"
 
 def detect_n_emb_face(data):
     try:
         contents = data.img_base64
         contents = base64.b64decode(contents)
         img_decode = cv2.imdecode(np.frombuffer(contents, np.uint8), -1)
+        
+        check_flr, message_flr = check_face_left_right(img_decode)
+        if check_flr == False:
+            return False,JSONResponse(content={
+                'status': 2,
+                'message': message_flr
+            })
+        
         check_eyes = check_eyes_open(img_decode)
         if check_eyes == False:
             return False,JSONResponse(content={
                 'status': 2,
-                'message': "Eyes are closed"
+                'message': "Eyes are closed! Please open your eyes"
             })
         boxes, scores, classIds, kpts = YOLOv8_face_detector.detect(img_decode)
     except Exception as e:
@@ -259,7 +313,7 @@ def detect_n_emb_face(data):
     if distance < 20 or distance > 150:
         return False,JSONResponse(content={
             'status': 2,
-            'message': "Face is too close or too far"
+            'message': "Face is too close or too far! Please move back or forward"
         })
     
     face = img_decode[y1:y2, x1:x2]
@@ -269,7 +323,7 @@ def detect_n_emb_face(data):
     if check_face_blur == False:
         return False,JSONResponse(content={
             'status': 2,
-            'message': "Face is blur"
+            'message': "Face is blur! Please keep your face in focus"
         })
     
     face = adjust_gamma(face, gamma=1.5)
@@ -279,7 +333,7 @@ def detect_n_emb_face(data):
         if is_real == False:
             return False,JSONResponse(content={
                 'status': 2,
-                'message': "Face is not real"
+                'message': "Face is not real! Please use your real face"
             })
     except Exception as e:
         del face, img_decode
@@ -393,6 +447,7 @@ async def face_recog_img_base64(data: FaceRecog):
 
     check_emb, message = detect_n_emb_face(data)
     if check_emb == False:
+        print(message)
         return message
     
     emb, img_decode = message
@@ -473,6 +528,7 @@ async def create_face_img_base64(data: CreateFace):
     
     check_emb, message = detect_n_emb_face(data)
     if check_emb == False:
+        print(message)
         return message
     
     emb, img_decode = message
