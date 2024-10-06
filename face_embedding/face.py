@@ -21,13 +21,13 @@ import gc
 
 
 modelpath ='./models/yolov8n-face.onnx'
-confThreshold = 0.5
+confThreshold = 0.8
 nmsThreshold = 0.7
 YOLOv8_face_detector = YOLOv8_face(modelpath, conf_thres=confThreshold, iou_thres=nmsThreshold)
 
 # Khởi tạo Mediapipe
 mp_face_mesh = mp.solutions.face_mesh
-
+mp_face_detection = mp.solutions.face_detection
 tags_metadata = [
     {
         "name": "Face",
@@ -60,7 +60,7 @@ LEFT_EYE_LANDMARKS = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE_LANDMARKS = [362, 385, 387, 263, 373, 380]
 
 # Ngưỡng để xác định mắt đang nhắm
-EYE_AR_THRESH = 0.3
+EYE_AR_THRESH = 0.25
 
 # set quyền truy cập cho API
 #app.add_middleware(HTTPSRedirectMiddleware)
@@ -160,13 +160,13 @@ def distance_face_to_camera(bbox_face, width_or):
     D = (W_face * F_pixel) / P
     return D
 
-def check_detect_blur(img, threshold=100):
+def check_detect_blur(img, threshold=350):
     # Đọc hình ảnh
     image = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
     # Tính toán biến thiên của Laplacian
     laplacian_var = cv2.Laplacian(image, cv2.CV_64F).var()
-    
+    print("laplacian_var", laplacian_var)
     # Kiểm tra nếu giá trị biến thiên nhỏ hơn ngưỡng (threshold)
     if laplacian_var < threshold:
         return False
@@ -244,11 +244,11 @@ def DetectDirection(landmark):
     if(left < right):
         ratio = right / left
         if(ratio > threshold):
-            result = "left"
+            result = "right"
     elif(right < left):
         ratio = left / right
         if(ratio > threshold):
-            result = "right"
+            result = "left"
     
     return result
 
@@ -256,14 +256,13 @@ def check_face_left_right(img_decode):
     with mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5) as face_mesh:
         results = face_mesh.process(cv2.cvtColor(img_decode, cv2.COLOR_BGR2RGB))
         if not results.multi_face_landmarks:
-            return False, "Face not detected"
+            return False, "Face not detected! Please try again"
 
         landmarks = results.multi_face_landmarks
         if(len(landmarks) == 0):
-            return False, "Face not detected"
+            return False, "Face not detected! Please try again"
         landmark = landmarks[0].landmark    
         direction = DetectDirection(landmark)
-        
         if direction == "left":
             return False, "Face is looking left! Please look straight"
         elif direction == "right":
@@ -271,13 +270,75 @@ def check_face_left_right(img_decode):
         else:
             return True, "Face is looking straight"
 
+def is_full_face(image):
+    with mp_face_detection.FaceDetection(model_selection=0, min_detection_confidence=0.5) as face_detection:
+        height, width = image.shape[:2]
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # Phát hiện khuôn mặt
+        results = face_detection.process(image_rgb)
+        # Kiểm tra từng khuôn mặt
+        if results.detections:
+            for detection in results.detections:
+                face_landmarks = detection.location_data.relative_keypoints
+                eye_left = face_landmarks[1]
+                eye_right = face_landmarks[0]
+                ears_right = face_landmarks[4]
+                ears_left = face_landmarks[5]
+                noise = face_landmarks[2]
+                mouth = face_landmarks[3]
+                
+                x_mouth = (mouth.x * image.shape[1])
+                y_mouth = (mouth.y * image.shape[0])
+                
+                x_ears_right = (ears_right.x * image.shape[1])
+                y_ears_right = (ears_right.y * image.shape[0])
+                
+                x_ears_left = (ears_left.x * image.shape[1])
+                y_ears_left = (ears_left.y * image.shape[0])
+                
+                x_eye_left = (eye_left.x * image.shape[1])
+                y_eye_left = (eye_left.y * image.shape[0])
+                
+                x_eye_right = (eye_right.x * image.shape[1])
+                y_eye_right = (eye_right.y * image.shape[0])
+                
+                x_noise = (noise.x * image.shape[1])
+                y_noise = (noise.y * image.shape[0])
+                
+                if x_mouth > width or y_mouth > height:
+                    # print("Mouth not in size face")
+                    return False, "Your mouth is not detected! Please show your face"
+                    
+                if x_ears_right > width or y_ears_right > height:
+                    return False, "Your right ear is not detected! Please show your face"
+
+                    
+                if x_ears_left > width or y_ears_left > height:
+                    return False, "Your left ear is not detected! Please show your face"
+                    
+                if x_eye_left > width or y_eye_left > height:
+                    return False, "Your left eye is not detected! Please show your face"
+                    
+                if x_eye_right > width or y_eye_right > height:
+                    return False, "Your right eye is not detected! Please show your face"
+            
+                if x_noise > width or y_noise > height:
+                    return False, "Your noise is not detected! Please show your face"
+            return True, "Face is detected"
+        else:
+            return False, "Face is not detected"
+
 def detect_n_emb_face(data):
     try:
+        # print("id", data.id)
+        # print("name", data.name)
+        # print("store_id", data.store_id)
         contents = data.img_base64
         contents = base64.b64decode(contents)
         img_decode = cv2.imdecode(np.frombuffer(contents, np.uint8), -1)
         
         check_flr, message_flr = check_face_left_right(img_decode)
+        print("check_flr", check_flr)
         if check_flr == False:
             return False,JSONResponse(content={
                 'status': 2,
@@ -285,18 +346,20 @@ def detect_n_emb_face(data):
             })
         
         check_eyes = check_eyes_open(img_decode)
+        print("check_eyes", check_eyes)
         if check_eyes == False:
             return False,JSONResponse(content={
                 'status': 2,
                 'message': "Eyes are closed! Please open your eyes"
             })
         boxes, scores, classIds, kpts = YOLOv8_face_detector.detect(img_decode)
+        print("Scores", scores)
     except Exception as e:
         del img_decode, contents
         gc.collect()
         return False,JSONResponse(content={
             'status': 2,
-            'message': "Error when detecting face"
+            'message': "Error when detecting face! Please try again"
         })
     idx_large = np.argmax(scores)
     box = boxes[idx_large]
@@ -309,8 +372,8 @@ def detect_n_emb_face(data):
     y2 = y2 + 10 if y2 + 10 < img_decode.shape[0] else img_decode.shape[0]
     
     distance = distance_face_to_camera((x1, y1, x2, y2), img_decode.shape[1])
-    
-    if distance < 20 or distance > 150:
+    print("distance", distance)
+    if distance < 30 or distance > 70:
         return False,JSONResponse(content={
             'status': 2,
             'message': "Face is too close or too far! Please move back or forward"
@@ -319,7 +382,16 @@ def detect_n_emb_face(data):
     face = img_decode[y1:y2, x1:x2]
     face = face.astype('uint8')
     
+    check_full_face,mess_full_face = is_full_face(face)
+    print("check_full_face", check_full_face)
+    if check_full_face == False:
+        return False,JSONResponse(content={
+            'status': 2,
+            'message': mess_full_face
+        })
+    
     check_face_blur = check_detect_blur(face)
+    print("check_face_blur", check_face_blur)
     if check_face_blur == False:
         return False,JSONResponse(content={
             'status': 2,
@@ -340,7 +412,8 @@ def detect_n_emb_face(data):
         gc.collect()
         return False,JSONResponse(content={
             'status': 2,
-            'message': "Error when encoding face"
+            # 'message': "Error when encoding face"
+            "message": "Error! Please try again"
         })
     return True, (emb, img_decode)
 
@@ -447,7 +520,7 @@ async def face_recog_img_base64(data: FaceRecog):
 
     check_emb, message = detect_n_emb_face(data)
     if check_emb == False:
-        print(message)
+        # print(message)
         return message
     
     emb, img_decode = message
@@ -472,7 +545,7 @@ async def face_recog_img_base64(data: FaceRecog):
     if id == "Unknown" and name == "Unknown":
         return JSONResponse(content={
             'status': 0,
-            'message': "Face is not existed in database"
+            'message': "Face is not existed! Please register your face or checkin again"
         })
     print({
             'status': 1,
@@ -517,6 +590,9 @@ async def create_face_img_base64(data: CreateFace):
     id = data.id
     name = data.name
     store_id = data.store_id
+    print("id", id)
+    print("name", name)
+    print("store_id", store_id)
     check_condition_face = check_condition(data, is_checkin=False)
     if check_condition_face != True:
         return check_condition_face
@@ -528,7 +604,7 @@ async def create_face_img_base64(data: CreateFace):
     
     check_emb, message = detect_n_emb_face(data)
     if check_emb == False:
-        print(message)
+        # print(message)
         return message
     
     emb, img_decode = message
@@ -537,7 +613,8 @@ async def create_face_img_base64(data: CreateFace):
     if result_cnc_clt == False:
         return JSONResponse(content={
             'status': 2,
-            'message': "Error when create collection"
+            # 'message': "Error when create collection"
+            'message': "Error"
         })
     
     # check if id is existed
