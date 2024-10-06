@@ -592,6 +592,7 @@ async def backup_db_one(store_id,background_tasks: BackgroundTasks):
             'status': 2,
             'message': str(e)
         })
+
 @app.get("/backup_all_db",
             tags=["Database"]
         )
