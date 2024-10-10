@@ -32,6 +32,8 @@ app = FastAPI(openapi_tags=tags_metadata, docs_url=None, redoc_url=None)
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int( os.getenv("QDRANT_PORT", "6333"))
+THRESHOLD_SEARCH = 0.54
+THRESHOLD_PASS = 0.44
 
 client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
@@ -243,7 +245,7 @@ async def search_point(data: SearchPoint):
         return JSONResponse(status_code=404, content={"message": "Embedding not found or invalid!"})
     
     try:
-        result = client.search(collection_name=collection_name, query_vector=vector_embedding, limit=1, query_filter = models.Filter(
+        result = client.search(collection_name=collection_name, query_vector=vector_embedding, limit=5, query_filter = models.Filter(
             must=[
                 models.FieldCondition(
                     key="store_id",
@@ -252,7 +254,49 @@ async def search_point(data: SearchPoint):
             ]
         ))
         print([(i.score, i.payload) for i in result])
-        return JSONResponse(status_code=200, content={"message": "Point found", "data": [(i.score, i.payload) for i in result if i.score >= 0.64]})
+
+        data = [(i.score, i.payload) for i in result if i.score >= THRESHOLD_PASS]
+        
+        if len(data) == 0:
+            return JSONResponse(status_code=200, content={"message": "Point not found", "data": []})
+        
+        data_dict = {}
+        for i in result:
+            if i.payload['id'] in data_dict:
+                data_dict[i.payload['id']] += 1
+            else:
+                data_dict[i.payload['id']] = 1
+        
+        print(data_dict)
+        
+        if len(set(data_dict.values())) == 1:
+            print("All values are the same")
+            data_result = [(i.score, i.payload) for i in result if i.score >= THRESHOLD_SEARCH]
+            
+            if len(data_result) == 0:
+                return JSONResponse(status_code=200, content={"message": "Point not found", "data": []})
+                
+            i_max = max(data_result, key=lambda x: x[0])
+            score = i_max[0]
+            payload = i_max[1]
+            return JSONResponse(status_code=200, content={"message": "Point found", "data": [(score,payload)]})
+        
+        id_max = max(data_dict, key=data_dict.get)
+        
+        scores = []
+        for i in result:
+            if i.payload['id'] == id_max:
+                scores.append(i.score)
+        
+        score = max(scores)
+        
+        payload = None
+        for i in result:
+            if i.payload['id'] == id_max:
+                payload = i.payload
+                break
+        
+        return JSONResponse(status_code=200, content={"message": "Point found", "data": [(score, payload)]})
     except Exception as e:
         return JSONResponse(status_code=404, content={"message": str(e)})
 

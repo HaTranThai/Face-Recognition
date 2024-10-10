@@ -62,6 +62,7 @@ URL_CREATE_SNAP = os.getenv("URL_CREATE_SNAP").format(ip_private = ip_private)
 URL_GET_CLT = os.getenv("URL_GET_CLT").format(ip_private = ip_private)
 URL_CRE_CLT = os.getenv("URL_CRE_CLT").format(ip_private = ip_private)
 
+FACE_EXT = int(os.getenv("FACE_EXT"))
 
 # set quyền truy cập cho API
 #app.add_middleware(HTTPSRedirectMiddleware)
@@ -79,6 +80,7 @@ class CreateFace(BaseModel):
     name: str = Query(None, description="Tên của khách hàng")
     role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
     store_id: str = Query(None, description="ID cửa hàng")
+    is_update: str = Query(None, description="1: Update face, 0: Create face")
 
 
 class DeleteFace(BaseModel):
@@ -92,29 +94,38 @@ class FaceRecog(BaseModel):
     role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
     store_id: str = Query(None, description="ID cửa hàng")
 
-def detect_n_emb_face(data):
+
+def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
     try:
         contents = data.img_base64
         contents = base64.b64decode(contents)
         img_decode = cv2.imdecode(np.frombuffer(contents, np.uint8), -1)
+        # print("img_decode", img_decode.shape)
         
-        check_flr, message_flr = check_face_left_right(img_decode)
-        print("check_flr", check_flr)
-        if check_flr == False:
-            return False,JSONResponse(content={
-                'status': 2,
-                'message': message_flr
-            })
+        if is_checkin == True:
+            check_flr, message_flr = check_face_left_right(img_decode)
+            print("check_flr", check_flr)
+            if check_flr == False:
+                return False,JSONResponse(content={
+                    'status': 2,
+                    'message': message_flr
+                })
         
-        check_eyes = check_eyes_open(img_decode)
-        print("check_eyes", check_eyes)
-        if check_eyes == False:
-            return False,JSONResponse(content={
-                'status': 2,
-                'message': "Eyes are closed! Please open your eyes"
-            })
-        boxes, scores, classIds, kpts = YOLOv8_face_detector.detect(img_decode)
-        print("Scores", scores)
+            check_eyes = check_eyes_open(img_decode)
+            print("check_eyes", check_eyes)
+            if check_eyes == False:
+                return False,JSONResponse(content={
+                    'status': 2,
+                    'message': "Eyes are closed! Please open your eyes"
+                })
+
+        if is_detect_face == True:
+            boxes, scores, classIds, kpts = YOLOv8_face_detector.detect(img_decode)
+            print("Scores", scores)
+        else:
+            scores = [0.9]
+            img_size = img_decode.shape
+            boxes = [[0, 0, img_size[1], img_size[0]]]
     except Exception as e:
         del img_decode, contents
         gc.collect()
@@ -126,44 +137,46 @@ def detect_n_emb_face(data):
     box = boxes[idx_large]
     x,y,w,h = box
     x1, y1, x2, y2 = int(x), int(y), int(x+w), int(y+h)
-    # mở rộng khuôn mặt ra 10px 
-    x1 = x1 - 10 if x1 - 10 > 0 else 0
-    y1 = y1 - 10 if y1 - 10 > 0 else 0
-    x2 = x2 + 10 if x2 + 10 < img_decode.shape[1] else img_decode.shape[1]
-    y2 = y2 + 10 if y2 + 10 < img_decode.shape[0] else img_decode.shape[0]
+    # mở rộng khuôn mặt ra FACE_EXTpx 
+    x1 = x1 - FACE_EXT if x1 - FACE_EXT > 0 else 0
+    y1 = y1 - FACE_EXT if y1 - FACE_EXT > 0 else 0
+    x2 = x2 + FACE_EXT if x2 + FACE_EXT < img_decode.shape[1] else img_decode.shape[1]
+    y2 = y2 + FACE_EXT if y2 + FACE_EXT < img_decode.shape[0] else img_decode.shape[0]
     
-    distance = distance_face_to_camera((x1, y1, x2, y2), img_decode.shape[1])
-    print("distance", distance)
-    if distance < 30 or distance > 70:
-        return False,JSONResponse(content={
-            'status': 2,
-            'message': "Face is too close or too far! Please move back or forward"
-        })
+    if is_checkin == True:
+        distance = distance_face_to_camera((x1, y1, x2, y2), img_decode.shape[1])
+        print("distance", distance)
+        if distance < 30 or distance > 70:
+            return False,JSONResponse(content={
+                'status': 2,
+                'message': "Face is too close or too far! Please move back or forward"
+            })
     
     face = img_decode[y1:y2, x1:x2]
     face = face.astype('uint8')
     
-    check_full_face,mess_full_face = is_full_face(face)
-    print("check_full_face", check_full_face)
-    if check_full_face == False:
-        return False,JSONResponse(content={
-            'status': 2,
-            'message': mess_full_face
-        })
-    
-    check_face_blur = check_detect_blur(face)
-    print("check_face_blur", check_face_blur)
-    if check_face_blur == False:
-        return False,JSONResponse(content={
-            'status': 2,
-            'message': "Face is blur! Please keep your face in focus"
-        })
+    if is_checkin == True:
+        check_full_face,mess_full_face = is_full_face(face)
+        print("check_full_face", check_full_face)
+        if check_full_face == False:
+            return False,JSONResponse(content={
+                'status': 2,
+                'message': mess_full_face
+            })
+        
+        check_face_blur = check_detect_blur(face)
+        print("check_face_blur", check_face_blur)
+        if check_face_blur == False:
+            return False,JSONResponse(content={
+                'status': 2,
+                'message': "Face is blur! Please keep your face in focus"
+            })
     
     face = adjust_gamma(face, gamma=1.5)
 
     try:
         emb,is_real = get_embedding(face, img_decode)
-        if is_real == False:
+        if is_real == False and is_checkin == True:
             return False,JSONResponse(content={
                 'status': 2,
                 'message': "Face is not real! Please use your real face"
@@ -241,7 +254,6 @@ async def check_connection():
             
             })
 async def face_recog_img_base64(data: FaceRecog):
-    
     check_condition_face, message_condition_face = check_condition(data, is_checkin=True)
     if check_condition_face == False:
         return JSONResponse(content={
@@ -272,7 +284,8 @@ async def face_recog_img_base64(data: FaceRecog):
         "vector_embedding": emb,
         "store_id": data.store_id
     }
-    print(requests.post(URL_SEARCH, json=data_search).json())
+    
+    # print(requests.post(URL_SEARCH, json=data_search).json())
     search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
     search_db = search_db[0] if len(search_db) > 0 else []
     name = search_db[1]['name'] if len(search_db) > 0 else "Unknown"
@@ -326,9 +339,6 @@ async def create_face_img_base64(data: CreateFace):
     id = data.id
     name = data.name
     store_id = data.store_id
-    print("id", id)
-    print("name", name)
-    print("store_id", store_id)
     check_condition_face, message_condition_face = check_condition(data, is_checkin=True)
     if check_condition_face == False:
         return JSONResponse(content={
@@ -342,9 +352,8 @@ async def create_face_img_base64(data: CreateFace):
     elif data.role == '0':
         collection_name=f'{store_id}_Customers'
     
-    check_emb, message = detect_n_emb_face(data)
+    check_emb, message = detect_n_emb_face(data, is_checkin=False)
     if check_emb == False:
-        # print(message)
         return message
     
     emb, img_decode = message
@@ -354,7 +363,7 @@ async def create_face_img_base64(data: CreateFace):
         return JSONResponse(content={
             'status': 2,
             # 'message': "Error when create collection"
-            'message': "Error"
+            'message': "Error! Please try again"
         })
     
     # check if id is existed
@@ -363,30 +372,45 @@ async def create_face_img_base64(data: CreateFace):
         "vector_embedding": emb,
         "store_id": data.store_id
     }
-    # print(requests.post(URL_SEARCH, json=data_search))
-    search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
-    search_db = search_db[0] if len(search_db) > 0 else []
-    if len(search_db) > 0:
-        return JSONResponse(content={
-            'status': 0,
-            'message': f'id {id} is existed'
-        })
-    data_insert = {
-            "collection_name": collection_name,
-            "vector_embedding": emb,
-            "id": id,
-            "name": name,
-            "store_id": store_id
-        }
+    # print(data_search)
+    if data.is_update == '0':
+        print(requests.post(URL_SEARCH, json=data_search).json())
+        search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
+        search_db = search_db[0] if len(search_db) > 0 else []
+
+        if len(search_db) > 0:
+            return JSONResponse(content={
+                'status': 0,
+                # 'message': f'id {id} is existed'
+                'message': "Face is existed! Please use another face"
+            })
+
+        data_insert = {
+                "collection_name": collection_name,
+                "vector_embedding": emb,
+                "id": id,
+                "name": name,
+                "store_id": store_id
+            }
+    else:
+        print("Update face")
+        data_insert = {
+                "collection_name": collection_name,
+                "vector_embedding": emb,
+                "id": id,
+                "name": name,
+                "store_id": store_id,
+                "is_update_id": "true"
+            }
+
     check = requests.post(URL_INSERT, json=data_insert)
     if check.status_code != 201:
         return JSONResponse(content={
             'status': 2,
             'message': "Error when insert face"
         })
+    
     save_face_image(data, img_decode, id, name, is_checkin=False)
-    # del search_db, emb, face, img_decode
-    # gc.collect()
     return JSONResponse(content={
         'status': 1,
         'message': f'Create face {name} with id {id} successfully'
@@ -437,7 +461,7 @@ async def delete_employee_face(data: DeleteFace):
     if check.status_code != 200:
         return JSONResponse(content={
             'status': 0,
-            'message': "Not found employee with id {id_em}"
+            'message': f"Not found employee with id {id_em}"
         })
     return JSONResponse(content={
         'status': 1,

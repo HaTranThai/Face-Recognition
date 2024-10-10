@@ -40,7 +40,7 @@ mp_face_detection = mp.solutions.face_detection
 
 def get_embedding(imgf,imgf_real):
     """
-    Get embedding from ndarray image
+    Get embedding from ndarray image and check face is real or not
     """
     embedding_objs = DeepFace.represent(
         img_path = imgf,
