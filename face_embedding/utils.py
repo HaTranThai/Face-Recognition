@@ -281,6 +281,18 @@ def is_full_face(image):
         else:
             return False, "Face is not detected"
 
+
+def check_face_mask(model, face):
+    '''
+    Kiểm tra xem khuôn mặt có đeo khẩu trang hay không
+    '''
+    prediction = model.predict(face)
+    class_id = int(prediction[0].boxes[0].cls)
+    
+    if class_id == 0 or class_id == 2:
+        return False, "Your face is wearing a mask! Please remove the mask"
+    return True, "Face is not wearing a mask"
+
 def cnc_clt_exist(store_id):
     '''
     Kiểm tra xem collection đã tồn tại chưa và tạo collection nếu chưa tồn tại

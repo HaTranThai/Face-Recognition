@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from models.yolo import YOLOv8_face
 from pydantic import BaseModel
 from deepface import DeepFace
+from ultralytics import YOLO
 
 from dotenv import load_dotenv
 from utils import (get_embedding, 
@@ -15,7 +16,8 @@ from utils import (get_embedding,
                 check_face_left_right,
                 is_full_face,
                 cnc_clt_exist,
-                check_condition)
+                check_condition,
+                check_face_mask)
 
 import cv2
 import numpy as np
@@ -27,13 +29,14 @@ import datetime
 import shutil
 import gc
 
-
 load_dotenv(dotenv_path=".env")
 
 modelpath ='./models/yolov8n-face.onnx'
 confThreshold = 0.8
 nmsThreshold = 0.7
 YOLOv8_face_detector = YOLOv8_face(modelpath, conf_thres=confThreshold, iou_thres=nmsThreshold)
+
+model_face_mask = YOLO("./models/yolov8n-facemask.pt")
 
 
 tags_metadata = [
@@ -80,7 +83,7 @@ class CreateFace(BaseModel):
     name: str = Query(None, description="Tên của khách hàng")
     role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
     store_id: str = Query(None, description="ID cửa hàng")
-    is_update: str = Query(None, description="1: Update face, 0: Create face")
+    is_update: str = Query("0", description="1: Update face, 0: Create face")
 
 
 class DeleteFace(BaseModel):
@@ -156,6 +159,14 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
     face = face.astype('uint8')
     
     if is_checkin == True:
+        check_face_is_mask, message_face_is_mask = check_face_mask(model_face_mask, face)
+        
+        if check_face_is_mask == False:
+            return False,JSONResponse(content={
+                'status': 2,
+                'message': message_face_is_mask
+            })
+        
         check_full_face,mess_full_face = is_full_face(face)
         print("check_full_face", check_full_face)
         if check_full_face == False:
