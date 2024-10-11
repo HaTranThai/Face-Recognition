@@ -282,14 +282,29 @@ def is_full_face(image):
             return False, "Face is not detected"
 
 
-def check_face_mask(model, face):
+def check_face_mask(model, img_decode, box):
     '''
     Kiểm tra xem khuôn mặt có đeo khẩu trang hay không
     '''
-    prediction = model.predict(face)
-    class_id = int(prediction[0].boxes[0].cls)
+    x,y,w,h = box
+    x1, y1, x2, y2 = int(x), int(y), int(x+w), int(y+h)
+    # mở rộng khuôn mặt ra FACE_EXTpx 
+    x1 = x1 - 40 if x1 - 40 > 0 else 0
+    y1 = y1 - 40 if y1 - 40 > 0 else 0
+    x2 = x2 + 40 if x2 + 40 < img_decode.shape[1] else img_decode.shape[1]
+    y2 = y2 + 40 if y2 + 40 < img_decode.shape[0] else img_decode.shape[0]
     
-    if class_id == 0 or class_id == 2:
+    face = img_decode[y1:y2, x1:x2]
+    face = face.astype('uint8')
+    
+    # save face image
+    # cv2.imwrite("face.jpg", face)
+    
+    prediction = model.predict(face)
+    labels = prediction[0]
+    class_id = int(prediction[0].boxes[0].cls)
+
+    if class_id == 1 or class_id == 2:
         return False, "Your face is wearing a mask! Please remove the mask"
     return True, "Face is not wearing a mask"
 

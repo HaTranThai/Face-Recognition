@@ -36,7 +36,7 @@ confThreshold = 0.8
 nmsThreshold = 0.7
 YOLOv8_face_detector = YOLOv8_face(modelpath, conf_thres=confThreshold, iou_thres=nmsThreshold)
 
-model_face_mask = YOLO("./models/yolov8n-facemask.pt")
+model_face_mask = YOLO("./models/best_face_mask.pt")
 
 
 tags_metadata = [
@@ -159,7 +159,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
     face = face.astype('uint8')
     
     if is_checkin == True:
-        check_face_is_mask, message_face_is_mask = check_face_mask(model_face_mask, face)
+        check_face_is_mask, message_face_is_mask = check_face_mask(model_face_mask, img_decode, box)
         
         if check_face_is_mask == False:
             return False,JSONResponse(content={
@@ -411,7 +411,7 @@ async def create_face_img_base64(data: CreateFace):
                 "id": id,
                 "name": name,
                 "store_id": store_id,
-                "is_update_id": "true"
+                # "is_update_id": "true"
             }
 
     check = requests.post(URL_INSERT, json=data_insert)
