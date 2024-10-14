@@ -34,6 +34,10 @@ RIGHT_EYE_LANDMARKS = list(map(int, os.getenv("RIGHT_EYE_LANDMARKS").strip('[]')
 # Ngưỡng để xác định mắt đang nhắm
 EYE_AR_THRESH = float(os.getenv("EYE_AR_THRESH"))
 
+BLUR_THRESHOLD = int(os.getenv("BLUR_THRESHOLD"))
+
+LEFT_RIGHT_FACE_THRESHOLD = float(os.getenv("LEFT_RIGHT_FACE_THRESHOLD"))
+
 # Khởi tạo Mediapipe
 mp_face_mesh = mp.solutions.face_mesh
 mp_face_detection = mp.solutions.face_detection
@@ -120,7 +124,7 @@ def distance_face_to_camera(bbox_face, width_or) -> float:
     D = (W_face * F_pixel) / P
     return D
 
-def check_detect_blur(img, threshold=350):
+def check_detect_blur(img, threshold=BLUR_THRESHOLD):
     '''
     Kiểm tra xem hình ảnh có bị mờ hay không
     '''
@@ -179,11 +183,11 @@ def CalcDistance(point1, point2):
     distance = math.sqrt((x1 - x2)**2 + (y1 - y2)**2)
     return distance
 
-def DetectDirection(landmark):
+def DetectDirection(landmark, threshold=LEFT_RIGHT_FACE_THRESHOLD):
     left = CalcDistance(landmark[5], landmark[234])
     right = CalcDistance(landmark[5], landmark[454])
 
-    threshold = 2.5
+    # threshold = 2.5
     result = "straight"
 
     if(left < right):
@@ -235,19 +239,19 @@ def is_full_face(image):
                 face_landmarks = detection.location_data.relative_keypoints
                 eye_left = face_landmarks[1]
                 eye_right = face_landmarks[0]
-                ears_right = face_landmarks[4]
-                ears_left = face_landmarks[5]
+                # ears_right = face_landmarks[4]
+                # ears_left = face_landmarks[5]
                 noise = face_landmarks[2]
                 mouth = face_landmarks[3]
                 
                 x_mouth = (mouth.x * image.shape[1])
                 y_mouth = (mouth.y * image.shape[0])
                 
-                x_ears_right = (ears_right.x * image.shape[1])
-                y_ears_right = (ears_right.y * image.shape[0])
+                # x_ears_right = (ears_right.x * image.shape[1])
+                # y_ears_right = (ears_right.y * image.shape[0])
                 
-                x_ears_left = (ears_left.x * image.shape[1])
-                y_ears_left = (ears_left.y * image.shape[0])
+                # x_ears_left = (ears_left.x * image.shape[1])
+                # y_ears_left = (ears_left.y * image.shape[0])
                 
                 x_eye_left = (eye_left.x * image.shape[1])
                 y_eye_left = (eye_left.y * image.shape[0])
@@ -262,12 +266,12 @@ def is_full_face(image):
                     # print("Mouth not in size face")
                     return False, "Your mouth is not detected! Please show your face"
                     
-                if x_ears_right > width or y_ears_right > height:
-                    return False, "Your right ear is not detected! Please show your face"
+                # if x_ears_right > width or y_ears_right > height:
+                #     return False, "Your right ear is not detected! Please show your face"
 
                     
-                if x_ears_left > width or y_ears_left > height:
-                    return False, "Your left ear is not detected! Please show your face"
+                # if x_ears_left > width or y_ears_left > height:
+                #     return False, "Your left ear is not detected! Please show your face"
                     
                 if x_eye_left > width or y_eye_left > height:
                     return False, "Your left eye is not detected! Please show your face"

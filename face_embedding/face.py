@@ -83,7 +83,7 @@ class CreateFace(BaseModel):
     name: str = Query(None, description="Tên của khách hàng")
     role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
     store_id: str = Query(None, description="ID cửa hàng")
-    is_update: str = Query("0", description="1: Update face, 0: Create face")
+    # is_update: str = Query(None, description="1: Update face, 0: Create face")
 
 
 class DeleteFace(BaseModel):
@@ -384,35 +384,35 @@ async def create_face_img_base64(data: CreateFace):
         "store_id": data.store_id
     }
     # print(data_search)
-    if data.is_update == '0':
-        print(requests.post(URL_SEARCH, json=data_search).json())
-        search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
-        search_db = search_db[0] if len(search_db) > 0 else []
+    # if data.is_update == '0':
+    print(requests.post(URL_SEARCH, json=data_search).json())
+    search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
+    search_db = search_db[0] if len(search_db) > 0 else []
 
-        if len(search_db) > 0:
-            return JSONResponse(content={
-                'status': 0,
-                # 'message': f'id {id} is existed'
-                'message': "Face is existed! Please use another face"
-            })
+    if len(search_db) > 0:
+        return JSONResponse(content={
+            'status': 0,
+            # 'message': f'id {id} is existed'
+            'message': "Face is existed! Please use another face"
+        })
 
-        data_insert = {
-                "collection_name": collection_name,
-                "vector_embedding": emb,
-                "id": id,
-                "name": name,
-                "store_id": store_id
-            }
-    else:
-        print("Update face")
-        data_insert = {
-                "collection_name": collection_name,
-                "vector_embedding": emb,
-                "id": id,
-                "name": name,
-                "store_id": store_id,
-                # "is_update_id": "true"
-            }
+    data_insert = {
+            "collection_name": collection_name,
+            "vector_embedding": emb,
+            "id": id,
+            "name": name,
+            "store_id": store_id
+        }
+    # else:
+    #     print("Update face")
+    #     data_insert = {
+    #             "collection_name": collection_name,
+    #             "vector_embedding": emb,
+    #             "id": id,
+    #             "name": name,
+    #             "store_id": store_id,
+    #             # "is_update_id": "true"
+    #         }
 
     check = requests.post(URL_INSERT, json=data_insert)
     if check.status_code != 201:
