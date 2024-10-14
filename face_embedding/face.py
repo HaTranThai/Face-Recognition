@@ -277,7 +277,7 @@ async def face_recog_img_base64(data: FaceRecog):
     elif data.role == '0':
         collection_name=f'{data.store_id}_Customers'
 
-    check_emb, message = detect_n_emb_face(data)
+    check_emb, message = detect_n_emb_face(data, is_checkin=False)
     if check_emb == False:
         # print(message)
         return message

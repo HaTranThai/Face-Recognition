@@ -17,11 +17,11 @@ FastDB_HOST = os.getenv("FASTAPI_HOST")
 FastDB_PORT = int(os.getenv("FASTAPI_PORT"))
 
 ip_private = f'http://{FastDB_HOST}:{FastDB_PORT}'
-URL_SEARCH = os.getenv("URL_SEARCH").format(ip_private = ip_private)
-URL_INSERT = os.getenv("URL_INSERT").format(ip_private = ip_private)
-URL_DELETE = os.getenv("URL_DELETE").format(ip_private = ip_private)
-URL_RECOVER_SNAP = os.getenv("URL_RECOVER_SNAP").format(ip_private = ip_private)
-URL_CREATE_SNAP = os.getenv("URL_CREATE_SNAP").format(ip_private = ip_private)
+# URL_SEARCH = os.getenv("URL_SEARCH").format(ip_private = ip_private)
+# URL_INSERT = os.getenv("URL_INSERT").format(ip_private = ip_private)
+# URL_DELETE = os.getenv("URL_DELETE").format(ip_private = ip_private)
+# URL_RECOVER_SNAP = os.getenv("URL_RECOVER_SNAP").format(ip_private = ip_private)
+# URL_CREATE_SNAP = os.getenv("URL_CREATE_SNAP").format(ip_private = ip_private)
 URL_GET_CLT = os.getenv("URL_GET_CLT").format(ip_private = ip_private)
 URL_CRE_CLT = os.getenv("URL_CRE_CLT").format(ip_private = ip_private)
 
