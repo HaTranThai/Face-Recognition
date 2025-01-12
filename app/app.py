@@ -32,7 +32,7 @@ app = FastAPI(openapi_tags=tags_metadata, docs_url=None, redoc_url=None)
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int( os.getenv("QDRANT_PORT", "6333"))
-THRESHOLD_PASS = 0.48
+THRESHOLD_PASS = 0.54
 THRESHOLD_SEARCH = 0.54
 
 client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)

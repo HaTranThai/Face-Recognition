@@ -11,6 +11,7 @@ import mediapipe as mp
 import math
 import requests
 
+
 load_dotenv(dotenv_path=".env")
 
 FastDB_HOST = os.getenv("FASTAPI_HOST")
@@ -293,10 +294,10 @@ def check_face_mask(model, img_decode, box):
     x,y,w,h = box
     x1, y1, x2, y2 = int(x), int(y), int(x+w), int(y+h)
     # mở rộng khuôn mặt ra FACE_EXTpx 
-    x1 = x1 - 40 if x1 - 40 > 0 else 0
-    y1 = y1 - 40 if y1 - 40 > 0 else 0
-    x2 = x2 + 40 if x2 + 40 < img_decode.shape[1] else img_decode.shape[1]
-    y2 = y2 + 40 if y2 + 40 < img_decode.shape[0] else img_decode.shape[0]
+    x1 = x1 - 80 if x1 - 80 > 0 else 0
+    y1 = y1 - 80 if y1 - 80 > 0 else 0
+    x2 = x2 + 80 if x2 + 80 < img_decode.shape[1] else img_decode.shape[1]
+    y2 = y2 + 80 if y2 + 80 < img_decode.shape[0] else img_decode.shape[0]
     
     face = img_decode[y1:y2, x1:x2]
     face = face.astype('uint8')
@@ -304,12 +305,20 @@ def check_face_mask(model, img_decode, box):
     # save face image
     # cv2.imwrite("face.jpg", face)
     
-    prediction = model.predict(face)
-    labels = prediction[0]
-    class_id = int(prediction[0].boxes[0].cls)
+    try:    
+        prediction = model.predict(face)
+        # with open("mask_detection.txt", "w") as f:
+        #     # f.write(str(prediction.boxes))
+        #     for result in prediction:
+        #         f.write(str(result.boxes))
+        labels = prediction[0]
+        # print(labels)
+        class_id = int(prediction[0].boxes[0].cls)
 
-    if class_id == 1 or class_id == 2:
-        return False, "Your face is wearing a mask! Please remove the mask"
+        if class_id == 1 or class_id == 2:
+            return False, "Your face is wearing a mask! Please remove the mask"
+    except:
+        return False, "Please checkin again!"
     return True, "Face is not wearing a mask"
 
 def cnc_clt_exist(store_id):

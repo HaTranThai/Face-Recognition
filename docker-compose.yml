@@ -13,9 +13,9 @@ services:
       - qdrant_data:/qdrant/storage
       - ./snapshots:/qdrant/snapshots
 
-  fastapi:
+  api_db:
     build: ./app/
-    container_name: fastapi-container
+    container_name: api_db-container
     networks:
       - network_face
     ports:
@@ -23,7 +23,7 @@ services:
     restart: always
     volumes:
       - ./app:/app
-    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7005", "--reload"]
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7005", "--workers", "8"]
     depends_on:
       - qdrant
     environment:
@@ -31,9 +31,9 @@ services:
       - QDRANT_PORT=6333
       - FASTAPI_PORT=7005
   
-  face_recognition:
+  api_fr:
     build: ./face_embedding/
-    container_name: face_embedding-container
+    container_name: api_fr-container
     networks:
       - network_face
     ports:
@@ -42,7 +42,7 @@ services:
     volumes:
       - ./face_embedding:/face_embedding
       - ./snapshots:/face_embedding/snapshots
-    command: ["uvicorn", "face:app", "--host", "0.0.0.0", "--port", "2024", "--reload"]
+    command: ["uvicorn", "face:app", "--host", "0.0.0.0", "--port", "2024", "--workers", "8"]
     depends_on:
       - qdrant
       - fastapi
@@ -52,13 +52,21 @@ services:
       - FASTAPI_HOST=fastapi
       - FASTAPI_PORT=7005
       - FACE_PORT=2024
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio_container
+    ports:
+      - "9000:9000" 
+      - "9001:9001" 
+    environment:
+      MINIO_ROOT_USER: minioadmin 
+      MINIO_ROOT_PASSWORD: minioadmin1245 
+    command: server /data --console-address ":9001"
+    volumes:
+      - ./data/miniodata:/data
+    networks:
+      - bbsw-network
 
 volumes:
   qdrant_data:
