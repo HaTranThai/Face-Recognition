@@ -230,6 +230,22 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
 async def root():
     return {"message": "Hello World"}
 
+@app.on_event("startup")
+async def startup_event():
+    try:
+        image = cv2.imread('testface.jpg')
+        face_is_real = DeepFace.extract_faces(
+            img_path = image,
+            detector_backend = "yolov8",
+            align = True,
+            anti_spoofing = True,
+        )
+        print(face_is_real)
+        # return face_is_real[0]["is_real"]
+    except Exception as e:
+        print(e)
+        # return False
+
 @app.get("/check_connection", description="Check connection")
 async def check_connection():
     try:
