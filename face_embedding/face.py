@@ -30,6 +30,7 @@ import base64
 import datetime
 import shutil
 import gc
+import boto3
 
 load_dotenv(dotenv_path=".env")
 
@@ -69,6 +70,20 @@ URL_CRE_CLT = os.getenv("URL_CRE_CLT").format(ip_private = ip_private)
 
 FACE_EXT = int(os.getenv("FACE_EXT"))
 
+s3_client = boto3.client(
+    's3',
+    endpoint_url='http://minio:9000',
+    aws_access_key_id='minioadmin',
+    aws_secret_access_key='minioadmin1245'
+)
+
+def ensure_bucket_exists(bucket_name: str):
+    """Ensure the bucket exists in MinIO."""
+    try:
+        s3_client.head_bucket(Bucket=bucket_name)
+    except Exception:
+        s3_client.create_bucket(Bucket=bucket_name)
+
 # set quyền truy cập cho API
 #app.add_middleware(HTTPSRedirectMiddleware)
 app.add_middleware(
@@ -80,9 +95,17 @@ app.add_middleware(
 )
 
 class CreateFace(BaseModel):
+    '''
+    Parameters:
     img_base64: str = Query(None, description="Ảnh chứa mặt để đăng ký")
-    id: str = Query(None, description="ID của khách hàng")
-    name: str = Query(None, description="Tên của khách hàng")
+    id: str = Query(None, description="ID của khách hàng/ nhân viên")
+    name: str = Query(None, description="Tên của khách hàng/ nhân viên")
+    role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
+    store_id: str = Query(None, description="ID cửa hàng")
+    '''
+    img_base64: str = Query(None, description="Ảnh chứa mặt để đăng ký")
+    id: str = Query(None, description="ID của khách hàng/ nhân viên")
+    name: str = Query(None, description="Tên của khách hàng/ nhân viên")
     role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
     store_id: str = Query(None, description="ID cửa hàng")
     # is_update: str = Query(None, description="1: Update face, 0: Create face")
@@ -263,7 +286,6 @@ async def check_connection():
         return False
 
 
-
 @app.post("/face_recog_img_base64",
             description="Face recognition from image base64; role: 1: Employee, 0: Customer", 
             tags=["Face"],
@@ -332,7 +354,7 @@ async def face_recog_img_base64(data: FaceRecog):
             "vector_embedding": emb,
             "store_id": data.store_id
         }
-    
+        # print(data_search)
     # print(requests.post(URL_SEARCH, json=data_search).json())
         search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
         search_db = search_db[0] if len(search_db) > 0 else []
@@ -345,12 +367,22 @@ async def face_recog_img_base64(data: FaceRecog):
                 'message': "Face is not existed! Please register your face or checkin again"
             })
         save_face_image(data, img_decode, id, name)
+        print(
+            {
+                'status': 1,
+                'id': id,
+                'name': name,
+            }
+        )
         return JSONResponse(content={
             'status': 1,
             'id': id,
             'name': name,
         })
-    except:
+    except Exception as e:
+        # print(e)
+        id = "Unknown"
+        name = "Unknown"
         save_face_image(data, img_decode, id, name)
         return JSONResponse(content={
             'status': 1,
@@ -358,57 +390,57 @@ async def face_recog_img_base64(data: FaceRecog):
             'name': name,
         })
     
-@app.post("/face_recog_img_base64_batch",
-            description="Face recognition from image base64 batch; role: 1: Employee, 0: Customer", 
-            tags=["Face"])
-async def face_recog_img_base64_batch(data_list: List[FaceRecog]):
-    for data in data_list:
-        try:
-            check_condition_face, message_condition_face = check_condition(data, is_checkin=True)
-            if check_condition_face == False:
-                continue
+# @app.post("/face_recog_img_base64_batch",
+#             description="Face recognition from image base64 batch; role: 1: Employee, 0: Customer", 
+#             tags=["Face"])
+# async def face_recog_img_base64_batch(data_list: List[FaceRecog]):
+#     for data in data_list:
+#         try:
+#             check_condition_face, message_condition_face = check_condition(data, is_checkin=True)
+#             if check_condition_face == False:
+#                 continue
             
-            if data.role == '1':
-                collection_name=f'{data.store_id}_Employees'
-                is_checkin = True
-            elif data.role == '0':
-                collection_name=f'{data.store_id}_Customers'
-                is_checkin = False
+#             if data.role == '1':
+#                 collection_name=f'{data.store_id}_Employees'
+#                 is_checkin = True
+#             elif data.role == '0':
+#                 collection_name=f'{data.store_id}_Customers'
+#                 is_checkin = False
 
-            check_emb, message = detect_n_emb_face(data, is_checkin=is_checkin)
-            if check_emb == False:
-                continue
+#             check_emb, message = detect_n_emb_face(data, is_checkin=is_checkin)
+#             if check_emb == False:
+#                 continue
             
-            emb, img_decode = message
+#             emb, img_decode = message
             
-            result_cnc_clt = cnc_clt_exist(data.store_id)
-            if result_cnc_clt == False:
-                continue
-            if emb is None:
-                save_face_image(data, img_decode, id, name)
-                continue
-            data_search = {
-                "collection_name": collection_name,
-                "vector_embedding": emb,
-                "store_id": data.store_id
-            }
+#             result_cnc_clt = cnc_clt_exist(data.store_id)
+#             if result_cnc_clt == False:
+#                 continue
+#             if emb is None:
+#                 save_face_image(data, img_decode, id, name)
+#                 continue
+#             data_search = {
+#                 "collection_name": collection_name,
+#                 "vector_embedding": emb,
+#                 "store_id": data.store_id
+#             }
         
-        # print(requests.post(URL_SEARCH, json=data_search).json())
-            search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
-            search_db = search_db[0] if len(search_db) > 0 else []
-            name = search_db[1]['name'] if len(search_db) > 0 else "Unknown"
-            id = search_db[1]['id'] if len(search_db) > 0 else "Unknown"
-            time_created = search_db[1]['time_created'] if len(search_db) > 0 else "Unknown"
-            if id == "Unknown" and name == "Unknown":
-                continue
-            save_face_image(data, img_decode, id, name)
-        except:
-            save_face_image(data, img_decode, id, name)
-            continue
-    return JSONResponse(content={
-        'status': 1,
-        'message': "Successfully"
-    })
+#         # print(requests.post(URL_SEARCH, json=data_search).json())
+#             search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
+#             search_db = search_db[0] if len(search_db) > 0 else []
+#             name = search_db[1]['name'] if len(search_db) > 0 else "Unknown"
+#             id = search_db[1]['id'] if len(search_db) > 0 else "Unknown"
+#             time_created = search_db[1]['time_created'] if len(search_db) > 0 else "Unknown"
+#             if id == "Unknown" and name == "Unknown":
+#                 continue
+#             save_face_image(data, img_decode, id, name)
+#         except:
+#             save_face_image(data, img_decode, id, name)
+#             continue
+#     return JSONResponse(content={
+#         'status': 1,
+#         'message': "Successfully"
+#     })
 
 @app.post("/create_face_img_base64", 
         description="Create face from image base64; id: ID of customer or id of employee; name: Name of customer or id of employee", 
@@ -513,6 +545,44 @@ async def create_face_img_base64(data: CreateFace):
         'status': 1,
         'message': f'Create face {name} with id {id} successfully'
     })
+
+
+def process_add_employee_face(data: CreateFace):
+    try:
+        img_base64 = data.img_base64
+        id = data.id
+        name = data.name
+        store_id = data.store_id
+        role = data.role
+        collection_name=f'{store_id}_Employees'
+        
+        check_emb, message = detect_n_emb_face(data, is_checkin=False)# False
+        if check_emb == False:
+            return message
+        emb, img_decode = message
+        
+        data_insert = {
+            "collection_name": collection_name,
+            "vector_embedding": emb,
+            "id": id,
+            "name": name,
+            "store_id": store_id
+        }
+        check = requests.post(URL_INSERT, json=data_insert)
+        if check.status_code != 201:
+            pass
+    except Exception as e:
+        pass
+@app.post("/add_employee_face",
+        description="Add face from image base64; id: ID of employee; name: Name of employee",
+        tags=["Face"])
+async def add_employee_face(data: CreateFace, background_tasks: BackgroundTasks):
+    background_tasks.add_task(process_add_employee_face, data)
+    return JSONResponse(content={
+        'status': 1,
+        'message': "Successfully"
+    })
+    
 
 @app.post("/create_face_img_base64_batch_customers",
             description="Create face from image base64 batch; id: ID of customer; name: Name of customer", 
