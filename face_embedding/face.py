@@ -7,7 +7,6 @@ from deepface import DeepFace
 from ultralytics import YOLO as yolofacemask
 from typing import List
 
-
 from dotenv import load_dotenv
 from utils import (get_embedding, 
                 adjust_gamma, 
@@ -31,8 +30,21 @@ import datetime
 import shutil
 import gc
 import boto3
+import logging
 
 load_dotenv(dotenv_path=".env")
+
+# Cấu hình logging
+logging.basicConfig(
+    level=logging.DEBUG,  # Đặt mức độ log
+    format="%(asctime)s - %(levelname)s - %(message)s",  # Định dạng log
+    datefmt="%Y-%m-%d %H:%M:%S",  # Định dạng thời gian
+    handlers=[
+        logging.StreamHandler(),  # Gửi log ra màn hình
+        logging.FileHandler("./logs/face.log", mode="a")  # Gửi log vào file app.log
+    ]
+)
+
 
 modelpath ='./models/yolov8n-face.onnx'
 confThreshold = 0.8
@@ -40,6 +52,7 @@ nmsThreshold = 0.7
 YOLOv8_face_detector = YOLOv8_face(modelpath, conf_thres=confThreshold, iou_thres=nmsThreshold)
 
 model_face_mask = yolofacemask("./models/best_face_mask.pt")
+logger = logging.getLogger(__name__)
 
 
 tags_metadata = [
@@ -76,13 +89,6 @@ s3_client = boto3.client(
     aws_access_key_id='minioadmin',
     aws_secret_access_key='minioadmin1245'
 )
-
-def ensure_bucket_exists(bucket_name: str):
-    """Ensure the bucket exists in MinIO."""
-    try:
-        s3_client.head_bucket(Bucket=bucket_name)
-    except Exception:
-        s3_client.create_bucket(Bucket=bucket_name)
 
 # set quyền truy cập cho API
 #app.add_middleware(HTTPSRedirectMiddleware)
@@ -129,18 +135,24 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
         contents = base64.b64decode(contents)
         img_decode = cv2.imdecode(np.frombuffer(contents, np.uint8), -1)
         
+        logger.info(f"detect_n_emb_face - Image decoded successfully from store {data.store_id}")
+
         if is_checkin == True:
             check_flr, message_flr = check_face_left_right(img_decode)
-            print("check_flr", check_flr)
+            # print("check_flr", check_flr)
+            logger.info(f"{data.store_id} - Check face left right: {check_flr}")
             if check_flr == False:
+                logger.warning(f"{data.store_id} - Face is not aligned properly: {message_flr}", )
                 return False,JSONResponse(content={
                     'status': 2,
                     'message': message_flr
                 })
         
             check_eyes = check_eyes_open(img_decode)
-            print("check_eyes", check_eyes)
+            # print("check_eyes", check_eyes)
+            logger.info(f"{data.store_id} - Check eyes open: {check_eyes}")
             if check_eyes == False:
+                logger.warning(f"detect_n_emb_face - {data.store_id} - Eyes are closed! Please open your eyes")
                 return False,JSONResponse(content={
                     'status': 2,
                     'message': "Eyes are closed! Please open your eyes"
@@ -149,14 +161,18 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
         if is_detect_face == True:
             try:
                 boxes, scores, classIds, kpts = YOLOv8_face_detector.detect(img_decode)
-                print("Scores", scores)
-            except:
+                # print("Scores", scores)
+                logger.info(f"{data.store_id} - Face detected successfully")
+            except Exception as e:
+                logger.warning(f"detect_n_emb_face - {data.store_id} - Error when detecting face: {str(e)}")
                 if is_checkin == True:
+                    logger.warning(f"detect_n_emb_face - {data.store_id} - Error when detecting face! Please try again")
                     return False,JSONResponse(content={
                         'status': 2,
                         'message': "Error when detecting face! Please try again"
                     })
                 else:
+                    logger.warning(f"{data.store_id} - Face is not detected")
                     return True, (None, img_decode)
         else:
             scores = [0.9]
@@ -165,6 +181,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
     except:
         # del img_decode, contents
         gc.collect()
+        logger.warning(f"{data.store_id} - Error when decoding image")
         return False,JSONResponse(content={
             'status': 2,
             'message': "Error when detecting face! Please try again"
@@ -183,7 +200,9 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
     if is_checkin == True:
         distance = distance_face_to_camera((x1, y1, x2, y2), img_decode.shape[1])
         print("distance", distance)
+        logger.info(f"{data.store_id} - Distance from face to camera: {distance}")
         if distance < 30 or distance > 70:
+            logger.warning(f"{data.store_id} - Face is too close or too far! Please move back or forward")
             return False,JSONResponse(content={
                 'status': 2,
                 'message': "Face is too close or too far! Please move back or forward"
@@ -202,16 +221,20 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
         #     })
         
         check_full_face,mess_full_face = is_full_face(face)
-        print("check_full_face", check_full_face)
+        # print("check_full_face", check_full_face)
+        logger.info(f"{data.store_id} - Check full face: {check_full_face}")
         if check_full_face == False:
+            logger.warning(f"{data.store_id} - Face is not full! Please keep your face in the frame")
             return False,JSONResponse(content={
                 'status': 2,
                 'message': mess_full_face
             })
         
         check_face_blur = check_detect_blur(face)
-        print("check_face_blur", check_face_blur)
+        # print("check_face_blur", check_face_blur)
+        logger.info(f"{data.store_id} - Check face blur: {check_face_blur}")
         if check_face_blur == False:
+            logger.warning(f"{data.store_id} - Face is blur! Please keep your face in focus")
             return False,JSONResponse(content={
                 'status': 2,
                 'message': "Face is blur! Please keep your face in focus"
@@ -222,6 +245,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
     try:
         emb,is_real = get_embedding(face, img_decode)
         if is_real == False and is_checkin == True:
+            logger.warning(f"{data.store_id} - Face is not real! Please use your real face")
             return False,JSONResponse(content={
                 'status': 2,
                 'message': "Face is not real! Please use your real face"
@@ -229,11 +253,13 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
     except Exception as e:
         del face, img_decode
         gc.collect()
+        logger.warning(f"{data.store_id} - Error when encoding face")
         return False,JSONResponse(content={
             'status': 2,
             # 'message': "Error when encoding face"
             "message": "Error! Please try again"
         })
+    logger.info(f"{data.store_id} - Face is real")
     return True, (emb, img_decode)
 
 
@@ -280,9 +306,10 @@ async def check_connection():
             anti_spoofing = True,
         )
         print(face_is_real)
+        logger.info(f"Connection successful, face is real: {face_is_real[0]['is_real']}")
         return face_is_real[0]["is_real"]
     except Exception as e:
-        print(e)
+        logger.error(f"Connection failed: {str(e)}")
         return False
 
 
@@ -318,6 +345,7 @@ async def face_recog_img_base64(data: FaceRecog):
     try:
         check_condition_face, message_condition_face = check_condition(data, is_checkin=True)
         if check_condition_face == False:
+            logger.warning(f"face_recog_img_base64 - {data.store_id} - {message_condition_face}")
             return JSONResponse(content={
                 'status': 2,
                 'message': message_condition_face
@@ -332,18 +360,21 @@ async def face_recog_img_base64(data: FaceRecog):
 
         check_emb, message = detect_n_emb_face(data, is_checkin=is_checkin)
         if check_emb == False:
+            logger.warning(f"face_recog_img_base64 - {data.store_id} - {message}")
             return message
         
         emb, img_decode = message
         
         result_cnc_clt = cnc_clt_exist(data.store_id)
         if result_cnc_clt == False:
+            logger.warning(f"face_recog_img_base64 - {data.store_id} - Error when create collection")
             return JSONResponse(content={
                 'status': 2,
                 'message': "Error when create collection"
             })
         if emb is None:
-            save_face_image(data, img_decode, id, name)
+            save_face_image(s3_client,data, img_decode, id, name)
+            logger.info(f"face_recog_img_base64 - {data.store_id} - without embedding")
             return JSONResponse(content={
                 'status': 1,
                 'id': id,
@@ -362,18 +393,21 @@ async def face_recog_img_base64(data: FaceRecog):
         id = search_db[1]['id'] if len(search_db) > 0 else "Unknown"
         time_created = search_db[1]['time_created'] if len(search_db) > 0 else "Unknown"
         if id == "Unknown" and name == "Unknown":
+            logger.warning(f"face_recog_img_base64 - {data.store_id} - Face is not existed! Please register your face or checkin again")
             return JSONResponse(content={
                 'status': 0,
                 'message': "Face is not existed! Please register your face or checkin again"
             })
-        save_face_image(data, img_decode, id, name)
-        print(
-            {
-                'status': 1,
-                'id': id,
-                'name': name,
-            }
-        )
+        save_face_image(s3_client,data, img_decode, id, name)
+        # print(
+        #     {
+        #         'status': 1,
+        #         'id': id,
+        #         'name': name,
+        #     }
+        # )
+        logger.info(f"face_recog_img_base64 - status: 1, id: {id}, name: {name}")
+        logger.info(f"face_recog_img_base64 - {data.store_id} - Face is recognized successfully")
         return JSONResponse(content={
             'status': 1,
             'id': id,
@@ -383,7 +417,8 @@ async def face_recog_img_base64(data: FaceRecog):
         # print(e)
         id = "Unknown"
         name = "Unknown"
-        save_face_image(data, img_decode, id, name)
+        save_face_image(s3_client,data, img_decode, id, name)
+        logger.warning(f"face_recog_img_base64 - {data.store_id} - Error when recognizing face")
         return JSONResponse(content={
             'status': 1,
             'id': id,
@@ -474,8 +509,10 @@ async def create_face_img_base64(data: CreateFace):
     id = data.id
     name = data.name
     store_id = data.store_id
+    logger.info(f"create_face_img_base64 - Create face {name} with id {id} from store {store_id}")
     check_condition_face, message_condition_face = check_condition(data, is_checkin=True)
     if check_condition_face == False:
+        logger.warning(f"{store_id} - {message_condition_face}")
         return JSONResponse(content={
             'status': 2,
             'message': message_condition_face
@@ -491,12 +528,14 @@ async def create_face_img_base64(data: CreateFace):
     
     check_emb, message = detect_n_emb_face(data, is_checkin=False)# False
     if check_emb == False:
+        logger.warning(f"create_face_img_base64 - {store_id} - {message}")
         return message
     
     emb, img_decode = message
 
     result_cnc_clt = cnc_clt_exist(data.store_id)
     if result_cnc_clt == False:
+        logger.warning(f"create_face_img_base64 - {store_id} - Error when create collection")
         return JSONResponse(content={
             'status': 2,
             # 'message': "Error when create collection"
@@ -504,7 +543,8 @@ async def create_face_img_base64(data: CreateFace):
         })
     
     if emb is None:
-        save_face_image(data, img_decode, id, name, is_checkin=False)
+        save_face_image(s3_client,data, img_decode, id, name, is_checkin=False)
+        logger.info(f"create_face_img_base64 - {store_id} - Create face {name} with id {id} successfully without embedding")
         return JSONResponse(content={
             'status': 1,
             'message': f'Create face {name} with id {id} successfully'
@@ -520,6 +560,7 @@ async def create_face_img_base64(data: CreateFace):
     search_db = search_db[0] if len(search_db) > 0 else []
 
     if len(search_db) > 0:
+        logger.warning(f"create_face_img_base64 - {store_id} - Face is existed! Please use another face")
         return JSONResponse(content={
             'status': 0,
             'message': "Face is existed! Please use another face"
@@ -535,12 +576,14 @@ async def create_face_img_base64(data: CreateFace):
 
     check = requests.post(URL_INSERT, json=data_insert)
     if check.status_code != 201:
+        logger.warning(f"create_face_img_base64 - {store_id} - Error when insert face")
         return JSONResponse(content={
             'status': 2,
             'message': "Error when insert face"
         })
     
-    save_face_image(data, img_decode, id, name, is_checkin=False)
+    save_face_image(s3_client, data, img_decode, id, name, is_checkin=False)
+    logger.info(f"create_face_img_base64 - {store_id} - Create face {name} with id {id} successfully")
     return JSONResponse(content={
         'status': 1,
         'message': f'Create face {name} with id {id} successfully'
@@ -558,6 +601,7 @@ def process_add_employee_face(data: CreateFace):
         
         check_emb, message = detect_n_emb_face(data, is_checkin=False)# False
         if check_emb == False:
+            logger.warning(f"process_add_employee_face - {store_id} - {message}")
             return message
         emb, img_decode = message
         
@@ -570,9 +614,10 @@ def process_add_employee_face(data: CreateFace):
         }
         check = requests.post(URL_INSERT, json=data_insert)
         if check.status_code != 201:
-            pass
+            logger.warning(f"process_add_employee_face - {store_id} - {check.content}")
+            print("Error when insert face", check.status_code, check.content)
     except Exception as e:
-        pass
+        print(e)
 @app.post("/add_employee_face",
         description="Add face from image base64; id: ID of employee; name: Name of employee",
         tags=["Face"])
@@ -601,7 +646,7 @@ async def create_face_img_base64_batch_customers(data_list: List[CreateFace]):
             contents = base64.b64decode(contents)
             img_decode = cv2.imdecode(np.frombuffer(contents, np.uint8), -1)
             
-            save_face_image(data, img_decode, id, name, is_checkin=False)
+            save_face_image(s3_client, data, img_decode, id, name, is_checkin=False)
             
             print("1")
             check_condition_face, message_condition_face = check_condition(data, is_checkin=True)
@@ -624,7 +669,7 @@ async def create_face_img_base64_batch_customers(data_list: List[CreateFace]):
             
             print("4")
             if emb is None:
-                save_face_image(data, img_decode, id, name, is_checkin=False)
+                save_face_image(s3_client, data, img_decode, id, name, is_checkin=False)
                 continue
             # check if id is existed
             data_search = {
@@ -653,7 +698,7 @@ async def create_face_img_base64_batch_customers(data_list: List[CreateFace]):
                 continue
             
             print("Save face")
-            save_face_image(data, img_decode, id, name, is_checkin=False)
+            save_face_image(s3_client, data, img_decode, id, name, is_checkin=False)
 
         return JSONResponse(content={
             'status': 1,
@@ -696,6 +741,7 @@ async def delete_employee_face(data: DeleteFace):
     id_em = data.id
     store_id = data.store_id
     if id_em is None:
+        logger.error(f"delete_employee_face - {store_id} - id is required")
         return JSONResponse(content={
             'status': 2,
             'message': "id is required"
@@ -708,10 +754,12 @@ async def delete_employee_face(data: DeleteFace):
     # print(data_delete)
     check = requests.delete(URL_DELETE, json=data_delete)
     if check.status_code != 200:
+        logger.error(f"delete_employee_face - {store_id} - Error when delete face")
         return JSONResponse(content={
             'status': 0,
             'message': f"Not found employee with id {id_em}"
         })
+    logger.info(f"delete_employee_face - {store_id} - Delete face with id {id_em} successfully")
     return JSONResponse(content={
         'status': 1,
         'message': f'Delete face with id {id_em} successfully'
