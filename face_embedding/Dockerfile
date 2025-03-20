@@ -26,6 +26,8 @@ RUN pip3 install requests
 RUN pip3 install python-multipart
 RUN pip3 install python-dotenv
 RUN pip3 install boto3
+RUN pip3 install httpx
+RUN pip3 install aioboto3
 
 # RUN pip3 install -r requirements.txt
 # RUN pip3 install --upgrade --upgrade-strategy eager -r requirements.txt

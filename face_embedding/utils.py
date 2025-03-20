@@ -48,11 +48,11 @@ mp_face_detection = mp.solutions.face_detection
 
 # Cấu hình logging
 logging.basicConfig(
-    level=logging.DEBUG,  # Đặt mức độ log
+    level=logging.INFO,  # Đặt mức độ log
     format="%(asctime)s - %(levelname)s - %(message)s",  # Định dạng log
     datefmt="%Y-%m-%d %H:%M:%S",  # Định dạng thời gian
     handlers=[
-        logging.StreamHandler(),  # Gửi log ra màn hình
+        # logging.StreamHandler(),  # Gửi log ra màn hình
         logging.FileHandler("./logs/face.log", mode="a")  # Gửi log vào file app.log
     ]
 )
@@ -133,7 +133,7 @@ def save_face_image(s3_client, data, face, id, name,is_checkin=True):
     
     time_checkin = datetime.datetime.now().strftime("%Y_%m_%d")
     second_checkin = datetime.datetime.now().strftime("%H_%M_%S")
-    file_name = f"{second_checkin}_{id}_{name}.jpg"
+    file_name = f"{id}_{name}_{second_checkin}.jpg"
     object_name = f"{data.store_id}/{time_checkin}/{file_name}"
 
     # Chuyển ảnh OpenCV thành buffer

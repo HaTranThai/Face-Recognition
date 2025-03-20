@@ -257,15 +257,18 @@ async def search_point(data: SearchPoint):
 
         data = [(i.score, i.payload) for i in result if i.score >= THRESHOLD_PASS]
         
+        print("Data search: ", data)
+        
         if len(data) == 0:
             return JSONResponse(status_code=200, content={"message": "Point not found", "data": []})
         
         data_dict = {}
         for i in result:
-            if i.payload['id'] in data_dict:
-                data_dict[i.payload['id']] += 1
-            else:
-                data_dict[i.payload['id']] = 1
+            if i.score >= THRESHOLD_PASS:
+                if i.payload['id'] in data_dict:
+                    data_dict[i.payload['id']] += 1
+                else:
+                    data_dict[i.payload['id']] = 1
         
         print(data_dict)
         

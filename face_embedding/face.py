@@ -5,7 +5,7 @@ from models.yolo import YOLOv8_face
 from pydantic import BaseModel
 from deepface import DeepFace
 from ultralytics import YOLO as yolofacemask
-from typing import List
+from typing import List, Union
 
 from dotenv import load_dotenv
 from utils import (get_embedding, 
@@ -31,20 +31,166 @@ import shutil
 import gc
 import boto3
 import logging
+import httpx
+import asyncio
+import aioboto3
+from io import BytesIO
+from functools import partial
+from concurrent.futures import ThreadPoolExecutor
 
 load_dotenv(dotenv_path=".env")
 
 # Cấu hình logging
 logging.basicConfig(
-    level=logging.DEBUG,  # Đặt mức độ log
+    level=logging.INFO,  # Đặt mức độ log
     format="%(asctime)s - %(levelname)s - %(message)s",  # Định dạng log
     datefmt="%Y-%m-%d %H:%M:%S",  # Định dạng thời gian
     handlers=[
-        logging.StreamHandler(),  # Gửi log ra màn hình
+        # logging.StreamHandler(),  # Gửi log ra màn hình
         logging.FileHandler("./logs/face.log", mode="a")  # Gửi log vào file app.log
     ]
 )
 
+# Giới hạn kết nối đồng thời 
+HTTP_SEMAPHORE = asyncio.Semaphore(20)  # Tối đa 20 kết nối HTTP đồng thời
+PROCESSING_SEMAPHORE = asyncio.Semaphore(5)  # Tối đa 5 xử lý hình ảnh đồng thời
+
+# S3 session bất đồng bộ
+s3_session = aioboto3.Session()
+
+# Client HTTP bất đồng bộ với cấu hình chung
+async def get_http_client():
+    return httpx.AsyncClient(timeout=30.0)
+
+# Hàm bất đồng bộ xử lý detect_n_emb_face
+async def async_detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
+    """
+    Phiên bản async của detect_n_emb_face, sử dụng ThreadPoolExecutor 
+    cho các tác vụ nặng về CPU (xử lý hình ảnh)
+    """
+    async with PROCESSING_SEMAPHORE:
+        loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor() as pool:
+            result = await loop.run_in_executor(
+                pool, 
+                partial(detect_n_emb_face, data, is_detect_face, is_checkin)
+            )
+        return result
+
+# Hàm bất đồng bộ lưu ảnh vào S3/MinIO
+async def async_save_face_image(data, img_decode, face_id, name, is_checkin=True):
+    """
+    Phiên bản async của save_face_image, sử dụng aioboto3
+    """
+    if is_checkin:
+        folder_save = os.getenv("CHECKIN_CUSTOMER_PATH") if data.role == '0' else os.getenv("CHECKIN_EMPLOYEE_PATH")
+    else:
+        folder_save = os.getenv("REGISTER_CUSTOMER_PATH") if data.role == '0' else os.getenv("REGISTER_EMPLOYEE_PATH")
+    
+    # Chuyển ảnh OpenCV thành buffer
+    _, img_encoded = cv2.imencode('.jpg', img_decode)
+    img_bytes = BytesIO(img_encoded.tobytes())
+    
+    time_checkin = datetime.datetime.now().strftime("%Y_%m_%d")
+    second_checkin = datetime.datetime.now().strftime("%H_%M_%S")
+    file_name = f"{face_id}_{name}_{second_checkin}.jpg"
+    object_name = f"{data.store_id}/{time_checkin}/{file_name}"
+    
+    async with s3_session.client(
+        's3',
+        endpoint_url='http://minio:9000',
+        aws_access_key_id='minioadmin',
+        aws_secret_access_key='minioadmin1245'
+    ) as s3:
+        try:
+            # Đảm bảo bucket tồn tại
+            try:
+                await s3.head_bucket(Bucket=folder_save)
+            except:
+                await s3.create_bucket(Bucket=folder_save)
+            
+            # Upload file
+            await s3.upload_fileobj(
+                img_bytes, folder_save, object_name,
+                ExtraArgs={'ContentType': 'image/jpeg'}
+            )
+            logger.info(f"Async uploaded image to MinIO: {folder_save} - {object_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Async failed to upload image to MinIO: {str(e)}")
+            return False
+
+# Hàm bất đồng bộ kiểm tra và tạo collection
+async def async_cnc_clt_exist(store_id):
+    async with HTTP_SEMAPHORE:
+        async with httpx.AsyncClient() as client:
+            try:
+                # Kiểm tra collection
+                response = await client.get(URL_GET_CLT)
+                check_clt = response.json()['collections']
+                
+                if f"{store_id}_Employees" not in check_clt or f"{store_id}_Customers" not in check_clt:
+                    logger.info(f"Creating collections for store {store_id}")
+                    # Tạo collections
+                    tasks = [
+                        client.post(URL_CRE_CLT, json={"collection_name": f"{store_id}_Customers"}),
+                        client.post(URL_CRE_CLT, json={"collection_name": f"{store_id}_Employees"})
+                    ]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    
+                    # Kiểm tra kết quả
+                    for i, result in enumerate(results):
+                        if isinstance(result, Exception):
+                            logger.error(f"Failed to create collection: {str(result)}")
+                            return False
+                        if result.status_code != 201:
+                            logger.error(f"Failed to create collection with status {result.status_code}")
+                            return False
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error in async_cnc_clt_exist: {str(e)}")
+                return False
+
+# Hàm bất đồng bộ tìm kiếm khuôn mặt 
+async def async_search_face(collection_name, embedding, store_id):
+    async with HTTP_SEMAPHORE:
+        data_search = {
+            "collection_name": collection_name,
+            "vector_embedding": embedding,
+            "store_id": store_id
+        }
+        
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(URL_SEARCH, json=data_search)
+                return response.json()
+            except Exception as e:
+                logger.error(f"Error in async_search_face: {str(e)}")
+                return {"data": []}
+
+# Hàm trích xuất thông tin từ kết quả tìm kiếm
+def extract_face_info(search_result):
+    """Trích xuất thông tin khuôn mặt từ kết quả tìm kiếm."""
+    try:
+        if not search_result or 'data' not in search_result or not search_result['data']:
+            return "Unknown", "Unknown", "Unknown"
+        
+        search_db = search_result['data']
+        if not search_db or len(search_db) == 0:
+            return "Unknown", "Unknown", "Unknown"
+        
+        search_item = search_db[0]
+        if len(search_item) > 1 and isinstance(search_item[1], dict):
+            return (
+                search_item[1].get('id', "Unknown"), 
+                search_item[1].get('name', "Unknown"), 
+                search_item[1].get('time_created', "Unknown")
+            )
+        return "Unknown", "Unknown", "Unknown"
+    except Exception as e:
+        logger.error(f"Error extracting face info: {str(e)}")
+        return "Unknown", "Unknown", "Unknown"
 
 modelpath ='./models/yolov8n-face.onnx'
 confThreshold = 0.8
@@ -110,7 +256,7 @@ class CreateFace(BaseModel):
     store_id: str = Query(None, description="ID cửa hàng")
     '''
     img_base64: str = Query(None, description="Ảnh chứa mặt để đăng ký")
-    id: str = Query(None, description="ID của khách hàng/ nhân viên")
+    id:  Union[int, str] = Query(None, description="ID của khách hàng/ nhân viên")
     name: str = Query(None, description="Tên của khách hàng/ nhân viên")
     role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
     store_id: str = Query(None, description="ID cửa hàng")
@@ -282,18 +428,26 @@ async def root():
 @app.on_event("startup")
 async def startup_event():
     try:
+        # Khởi tạo các mô hình và tài nguyên cần thiết
         image = cv2.imread('testface.jpg')
         face_is_real = DeepFace.extract_faces(
-            img_path = image,
-            detector_backend = "yolov8",
-            align = True,
-            anti_spoofing = True,
+            img_path=image,
+            detector_backend="yolov8",
+            align=True,
+            anti_spoofing=True,
         )
         print(face_is_real)
-        # return face_is_real[0]["is_real"]
+        
+        # Tạo thư mục logs nếu chưa có
+        os.makedirs("./logs", exist_ok=True)
+        
+        # Khởi tạo S3 session
+        global s3_session
+        s3_session = aioboto3.Session()
+        
+        logger.info("Application started successfully")
     except Exception as e:
-        print(e)
-        # return False
+        logger.error(f"Error during startup: {str(e)}")
 
 @app.get("/check_connection", description="Check connection")
 async def check_connection():
@@ -343,139 +497,162 @@ async def check_connection():
             })
 async def face_recog_img_base64(data: FaceRecog):
     try:
+        # Kiểm tra điều kiện đầu vào
         check_condition_face, message_condition_face = check_condition(data, is_checkin=True)
-        if check_condition_face == False:
+        if not check_condition_face:
             logger.warning(f"face_recog_img_base64 - {data.store_id} - {message_condition_face}")
             return JSONResponse(content={
                 'status': 2,
                 'message': message_condition_face
             })
         
+        # Xác định collection name và chế độ
         if data.role == '1':
-            collection_name=f'{data.store_id}_Employees'
+            collection_name = f'{data.store_id}_Employees'
             is_checkin = True
         elif data.role == '0':
-            collection_name=f'{data.store_id}_Customers'
+            collection_name = f'{data.store_id}_Customers'
             is_checkin = False
-
-        check_emb, message = detect_n_emb_face(data, is_checkin=is_checkin)
-        if check_emb == False:
-            logger.warning(f"face_recog_img_base64 - {data.store_id} - {message}")
-            return message
-        
-        emb, img_decode = message
-        
-        result_cnc_clt = cnc_clt_exist(data.store_id)
-        if result_cnc_clt == False:
+        else:
+            return JSONResponse(content={
+                'status': 2,
+                'message': "Invalid role"
+            })
+            
+        # Kiểm tra và tạo collection nếu cần - async
+        collection_exists = await async_cnc_clt_exist(data.store_id)
+        if not collection_exists:
             logger.warning(f"face_recog_img_base64 - {data.store_id} - Error when create collection")
             return JSONResponse(content={
                 'status': 2,
                 'message': "Error when create collection"
             })
+        
+        # Phát hiện và tính embedding - async wrapper cho CPU-intensive task
+        check_emb, message = await async_detect_n_emb_face(data, is_checkin=is_checkin)
+        if not check_emb:
+            logger.warning(f"face_recog_img_base64 - {data.store_id} - {message}")
+            return message
+        
+        emb, img_decode = message
+        
+        # Nếu không có embedding (ví dụ: không phát hiện khuôn mặt)
         if emb is None:
-            save_face_image(s3_client,data, img_decode, id, name)
+            # Lưu ảnh bất đồng bộ
+            await async_save_face_image(data, img_decode, "Unknown", "Unknown")
             logger.info(f"face_recog_img_base64 - {data.store_id} - without embedding")
             return JSONResponse(content={
                 'status': 1,
-                'id': id,
-                'name': name,
+                'id': "Unknown",
+                'name': "Unknown",
             })
-        data_search = {
-            "collection_name": collection_name,
-            "vector_embedding": emb,
-            "store_id": data.store_id
-        }
-        # print(data_search)
-    # print(requests.post(URL_SEARCH, json=data_search).json())
-        search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
-        search_db = search_db[0] if len(search_db) > 0 else []
-        name = search_db[1]['name'] if len(search_db) > 0 else "Unknown"
-        id = search_db[1]['id'] if len(search_db) > 0 else "Unknown"
-        time_created = search_db[1]['time_created'] if len(search_db) > 0 else "Unknown"
-        if id == "Unknown" and name == "Unknown":
+        
+        # Tìm kiếm khuôn mặt - bất đồng bộ
+        search_result = await async_search_face(collection_name, emb, data.store_id)
+        
+        # Trích xuất thông tin từ kết quả tìm kiếm
+        face_id, name, time_created = extract_face_info(search_result)
+        
+        # Nếu không tìm thấy khuôn mặt
+        if face_id == "Unknown" and name == "Unknown":
             logger.warning(f"face_recog_img_base64 - {data.store_id} - Face is not existed! Please register your face or checkin again")
             return JSONResponse(content={
                 'status': 0,
                 'message': "Face is not existed! Please register your face or checkin again"
             })
-        save_face_image(s3_client,data, img_decode, id, name)
-        # print(
-        #     {
-        #         'status': 1,
-        #         'id': id,
-        #         'name': name,
-        #     }
-        # )
-        logger.info(f"face_recog_img_base64 - status: 1, id: {id}, name: {name}")
-        logger.info(f"face_recog_img_base64 - {data.store_id} - Face is recognized successfully")
-        return JSONResponse(content={
-            'status': 1,
-            'id': id,
-            'name': name,
-        })
-    except Exception as e:
-        # print(e)
-        id = "Unknown"
-        name = "Unknown"
-        save_face_image(s3_client,data, img_decode, id, name)
-        logger.warning(f"face_recog_img_base64 - {data.store_id} - Error when recognizing face")
-        return JSONResponse(content={
-            'status': 1,
-            'id': id,
-            'name': name,
-        })
-    
-# @app.post("/face_recog_img_base64_batch",
-#             description="Face recognition from image base64 batch; role: 1: Employee, 0: Customer", 
-#             tags=["Face"])
-# async def face_recog_img_base64_batch(data_list: List[FaceRecog]):
-#     for data in data_list:
-#         try:
-#             check_condition_face, message_condition_face = check_condition(data, is_checkin=True)
-#             if check_condition_face == False:
-#                 continue
-            
-#             if data.role == '1':
-#                 collection_name=f'{data.store_id}_Employees'
-#                 is_checkin = True
-#             elif data.role == '0':
-#                 collection_name=f'{data.store_id}_Customers'
-#                 is_checkin = False
-
-#             check_emb, message = detect_n_emb_face(data, is_checkin=is_checkin)
-#             if check_emb == False:
-#                 continue
-            
-#             emb, img_decode = message
-            
-#             result_cnc_clt = cnc_clt_exist(data.store_id)
-#             if result_cnc_clt == False:
-#                 continue
-#             if emb is None:
-#                 save_face_image(data, img_decode, id, name)
-#                 continue
-#             data_search = {
-#                 "collection_name": collection_name,
-#                 "vector_embedding": emb,
-#                 "store_id": data.store_id
-#             }
         
-#         # print(requests.post(URL_SEARCH, json=data_search).json())
-#             search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
-#             search_db = search_db[0] if len(search_db) > 0 else []
-#             name = search_db[1]['name'] if len(search_db) > 0 else "Unknown"
-#             id = search_db[1]['id'] if len(search_db) > 0 else "Unknown"
-#             time_created = search_db[1]['time_created'] if len(search_db) > 0 else "Unknown"
-#             if id == "Unknown" and name == "Unknown":
-#                 continue
-#             save_face_image(data, img_decode, id, name)
-#         except:
-#             save_face_image(data, img_decode, id, name)
-#             continue
-#     return JSONResponse(content={
-#         'status': 1,
-#         'message': "Successfully"
-#     })
+        # Lưu ảnh - bất đồng bộ
+        await async_save_face_image(data, img_decode, face_id, name)
+        
+        # Log và trả về kết quả
+        logger.info(f"face_recog_img_base64 - status: 1, id: {face_id}, name: {name}")
+        logger.info(f"face_recog_img_base64 - {data.store_id} - Face is recognized successfully")
+        
+        return JSONResponse(content={
+            'status': 1,
+            'id': face_id,
+            'name': name,
+        })
+        
+    except Exception as e:
+        logger.error(f"face_recog_img_base64 - {data.store_id} - Error: {str(e)}")
+        # Trong trường hợp lỗi, lưu ảnh với thông tin Unknown
+        try:
+            await async_save_face_image(data, img_decode, "Unknown", "Unknown")
+        except Exception as save_error:
+            logger.error(f"Failed to save image: {str(save_error)}")
+            
+        return JSONResponse(content={
+            'status': 1,
+            'id': "Unknown",
+            'name': "Unknown",
+        })
+
+@app.post("/face_recog_img_base64_batch",
+            description="Face recognition from image base64 batch; role: 1: Employee, 0: Customer", 
+            tags=["Face"])
+async def face_recog_img_base64_batch(data_list: List[FaceRecog]):
+    """
+    Xử lý nhận dạng khuôn mặt hàng loạt - bất đồng bộ với asyncio.gather
+    """
+    async def process_single_item(data):
+        try:
+            # Kiểm tra điều kiện
+            check_condition_face, message_condition_face = check_condition(data, is_checkin=True)
+            if not check_condition_face:
+                logger.warning(f"batch - {data.store_id} - {message_condition_face}")
+                return
+            
+            # Xác định collection name và chế độ
+            if data.role == '1':
+                collection_name = f'{data.store_id}_Employees'
+                is_checkin = True
+            elif data.role == '0':
+                collection_name = f'{data.store_id}_Customers'
+                is_checkin = False
+            else:
+                logger.warning(f"batch - {data.store_id} - Invalid role")
+                return
+            
+            # Kiểm tra và tạo collection nếu cần
+            collection_exists = await async_cnc_clt_exist(data.store_id)
+            if not collection_exists:
+                logger.warning(f"batch - {data.store_id} - Error with collection")
+                return
+            
+            # Phát hiện và tính embedding
+            check_emb, message = await async_detect_n_emb_face(data, is_checkin=is_checkin)
+            if not check_emb:
+                logger.warning(f"batch - {data.store_id} - {message}")
+                return
+            
+            emb, img_decode = message
+            
+            # Nếu không có embedding
+            if emb is None:
+                await async_save_face_image(data, img_decode, "Unknown", "Unknown")
+                return
+            
+            # Tìm kiếm khuôn mặt
+            search_result = await async_search_face(collection_name, emb, data.store_id)
+            face_id, name, _ = extract_face_info(search_result)
+            
+            # Lưu ảnh
+            await async_save_face_image(data, img_decode, face_id, name)
+            
+        except Exception as e:
+            logger.error(f"batch - Error processing item: {str(e)}")
+    
+    # Tạo danh sách các task
+    tasks = [process_single_item(data) for data in data_list]
+    
+    # Xử lý đồng thời tất cả các task
+    await asyncio.gather(*tasks)
+    
+    return JSONResponse(content={
+        'status': 1,
+        'message': "Successfully processed batch"
+    })
 
 @app.post("/create_face_img_base64", 
         description="Create face from image base64; id: ID of customer or id of employee; name: Name of customer or id of employee", 
@@ -493,116 +670,117 @@ async def face_recog_img_base64(data: FaceRecog):
                 }
             }
         })
-
 async def create_face_img_base64(data: CreateFace):
     """
-        Create a face from an image base64.
-
-        Parameters:
-            - data (CreateFace): The data containing the image base64, id, name, and role.
-
-        Returns:
-            - JSONResponse: The response containing the status and message of the face creation process.
-                - status (int): The status code of the response.
-                - message (str): The message indicating the result of the face creation process.
+    Tạo khuôn mặt mới từ ảnh base64 (phiên bản async).
     """
-    id = data.id
-    name = data.name
+    id_value = data.id
+    name_value = data.name
     store_id = data.store_id
-    logger.info(f"create_face_img_base64 - Create face {name} with id {id} from store {store_id}")
+    
+    logger.info(f"create_face_img_base64 - Create face {name_value} with id {id_value} from store {store_id}")
+    
+    # Kiểm tra điều kiện đầu vào
     check_condition_face, message_condition_face = check_condition(data, is_checkin=True)
-    if check_condition_face == False:
+    if not check_condition_face:
         logger.warning(f"{store_id} - {message_condition_face}")
         return JSONResponse(content={
             'status': 2,
             'message': message_condition_face
         })
     
-
+    # Xác định collection name và chế độ
     if data.role == '1':
-        collection_name=f'{store_id}_Employees'
+        collection_name = f'{store_id}_Employees'
         is_checkin = False
     elif data.role == '0':
-        collection_name=f'{store_id}_Customers'
+        collection_name = f'{store_id}_Customers'
         is_checkin = False
+    else:
+        return JSONResponse(content={
+            'status': 2,
+            'message': "Invalid role"
+        })
     
-    check_emb, message = detect_n_emb_face(data, is_checkin=False)# False
-    if check_emb == False:
+    # Kiểm tra và tạo collection nếu cần - async
+    collection_exists = await async_cnc_clt_exist(store_id)
+    if not collection_exists:
+        logger.warning(f"create_face_img_base64 - {store_id} - Error when create collection")
+        return JSONResponse(content={
+            'status': 2,
+            'message': "Error! Please try again"
+        })
+    
+    # Phát hiện và tính embedding - async wrapper 
+    check_emb, message = await async_detect_n_emb_face(data, is_checkin=False)
+    if not check_emb:
         logger.warning(f"create_face_img_base64 - {store_id} - {message}")
         return message
     
     emb, img_decode = message
-
-    result_cnc_clt = cnc_clt_exist(data.store_id)
-    if result_cnc_clt == False:
-        logger.warning(f"create_face_img_base64 - {store_id} - Error when create collection")
-        return JSONResponse(content={
-            'status': 2,
-            # 'message': "Error when create collection"
-            'message': "Error! Please try again"
-        })
     
+    # Nếu không có embedding
     if emb is None:
-        save_face_image(s3_client,data, img_decode, id, name, is_checkin=False)
-        logger.info(f"create_face_img_base64 - {store_id} - Create face {name} with id {id} successfully without embedding")
+        await async_save_face_image(data, img_decode, id_value, name_value, is_checkin=False)
+        logger.info(f"create_face_img_base64 - {store_id} - Create face {name_value} with id {id_value} successfully without embedding")
         return JSONResponse(content={
             'status': 1,
-            'message': f'Create face {name} with id {id} successfully'
+            'message': f'Create face {name_value} with id {id_value} successfully'
         })
-    # check if id is existed
-    data_search = {
-        "collection_name": collection_name,
-        "vector_embedding": emb,
-        "store_id": data.store_id
-    }
-
-    search_db = requests.post(URL_SEARCH, json=data_search).json()['data']
-    search_db = search_db[0] if len(search_db) > 0 else []
-
-    if len(search_db) > 0:
+    
+    # Kiểm tra khuôn mặt đã tồn tại - async
+    search_result = await async_search_face(collection_name, emb, store_id)
+    
+    if search_result.get('data') and len(search_result['data']) > 0:
         logger.warning(f"create_face_img_base64 - {store_id} - Face is existed! Please use another face")
         return JSONResponse(content={
             'status': 0,
             'message': "Face is existed! Please use another face"
         })
-
-    data_insert = {
-            "collection_name": collection_name,
-            "vector_embedding": emb,
-            "id": id,
-            "name": name,
-            "store_id": store_id
-        }
-
-    check = requests.post(URL_INSERT, json=data_insert)
-    if check.status_code != 201:
-        logger.warning(f"create_face_img_base64 - {store_id} - Error when insert face")
-        return JSONResponse(content={
-            'status': 2,
-            'message': "Error when insert face"
-        })
     
-    save_face_image(s3_client, data, img_decode, id, name, is_checkin=False)
-    logger.info(f"create_face_img_base64 - {store_id} - Create face {name} with id {id} successfully")
+    # Thêm khuôn mặt mới - async
+    data_insert = {
+        "collection_name": collection_name,
+        "vector_embedding": emb,
+        "id": id_value,
+        "name": name_value,
+        "store_id": store_id
+    }
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.post(URL_INSERT, json=data_insert)
+        
+        if response.status_code != 201:
+            logger.warning(f"create_face_img_base64 - {store_id} - Error when insert face")
+            return JSONResponse(content={
+                'status': 2,
+                'message': "Error when insert face"
+            })
+    
+    # Lưu ảnh - async
+    await async_save_face_image(data, img_decode, id_value, name_value, is_checkin=False)
+    
+    logger.info(f"create_face_img_base64 - {store_id} - Create face {name_value} with id {id_value} successfully")
     return JSONResponse(content={
         'status': 1,
-        'message': f'Create face {name} with id {id} successfully'
+        'message': f'Create face {name_value} with id {id_value} successfully'
     })
-
 
 def process_add_employee_face(data: CreateFace):
     try:
         img_base64 = data.img_base64
-        id = data.id
+        id = str(data.id)
         name = data.name
         store_id = data.store_id
         role = data.role
         collection_name=f'{store_id}_Employees'
         
+        logger.info(f"process_add_employee_face - {data.store_id} - Add face id {id} - name {name} - role {role}")
+        
         check_emb, message = detect_n_emb_face(data, is_checkin=False)# False
         if check_emb == False:
-            logger.warning(f"process_add_employee_face - {store_id} - {message}")
-            return message
+            logger.error(f"process_add_employee_face - {store_id} - {message}")
+            return
         emb, img_decode = message
         
         data_insert = {
@@ -614,10 +792,24 @@ def process_add_employee_face(data: CreateFace):
         }
         check = requests.post(URL_INSERT, json=data_insert)
         if check.status_code != 201:
-            logger.warning(f"process_add_employee_face - {store_id} - {check.content}")
-            print("Error when insert face", check.status_code, check.content)
+            logger.error(f"process_add_employee_face - {store_id} - {check.content}")
+            # print("Error when insert face", check.status_code, check.content)
+            # return JSONResponse(content={
+            #     'status': 0,
+            #     'message': f"Id {id} - error {check.content}"
+            # })
+            return
+        save_face_image(s3_client, data, img_decode, id, name, is_checkin=False)
+        logger.info(f"process_add_employee_face - {data.store_id} - Add face {id} successfully")
+
     except Exception as e:
-        print(e)
+        logger.error(f"process_add_employee_face - {data.store_id} - {str(e)}")
+        return
+        # return JSONResponse(content={
+        #     'status': 2,
+        #     'message': e
+        # })
+
 @app.post("/add_employee_face",
         description="Add face from image base64; id: ID of employee; name: Name of employee",
         tags=["Face"])
@@ -627,7 +819,6 @@ async def add_employee_face(data: CreateFace, background_tasks: BackgroundTasks)
         'status': 1,
         'message': "Successfully"
     })
-    
 
 @app.post("/create_face_img_base64_batch_customers",
             description="Create face from image base64 batch; id: ID of customer; name: Name of customer", 
@@ -881,7 +1072,7 @@ async def delete_employee_face(data: DeleteFace):
 #         'message': f'Update face {name} with id {id} successfully'
 #     })
 @app.get("/backup_db_one",
-            tags=["Database"]
+            tags=["Database"], 
         )
 async def backup_db_one(store_id,background_tasks: BackgroundTasks):
     file_path_customer = f'./snapshots/{store_id}_Customers'
@@ -927,9 +1118,9 @@ async def backup_all_db(background_tasks: BackgroundTasks):
     files_path_employee=[]
     
     for clt in clts:
-        if clt.endswith('Customers'):
+        if (clt.endswith('Customers')):
             files_path_customer.append(clt)
-        elif clt.endswith('Employees'):
+        elif (clt.endswith('Employees')):
             files_path_employee.append(clt)
     for file_path_customer, file_path_employee in zip(files_path_customer, files_path_employee):
         if not os.path.exists("./snapshots/"+file_path_customer) or not os.path.exists("./snapshots/"+file_path_employee):
