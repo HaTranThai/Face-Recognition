@@ -28,7 +28,7 @@ tags_metadata = [
 ]
 # from qdrant_db import *
 # docs_url=None, redoc_url=None
-app = FastAPI(openapi_tags=tags_metadata, docs_url=None, redoc_url=None)
+app = FastAPI(openapi_tags=tags_metadata)
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int( os.getenv("QDRANT_PORT", "6333"))
@@ -224,6 +224,7 @@ async def insert_point(data:InsertPoint):
                             payload=payload
                 )
         client.upsert(collection_name=collection_name, points=[point])
+        
         return JSONResponse(status_code=201, content={"message": "Point inserted"})
     except Exception as e:
         return JSONResponse(status_code=404, content={"message": str(e)})

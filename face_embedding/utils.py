@@ -42,6 +42,10 @@ BLUR_THRESHOLD = int(os.getenv("BLUR_THRESHOLD"))
 
 LEFT_RIGHT_FACE_THRESHOLD = float(os.getenv("LEFT_RIGHT_FACE_THRESHOLD"))
 
+
+FACE_EXT = int(os.getenv("FACE_EXT"))
+CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD"))
+
 # Khởi tạo Mediapipe
 mp_face_mesh = mp.solutions.face_mesh
 mp_face_detection = mp.solutions.face_detection
@@ -86,6 +90,32 @@ def get_embedding(imgf,imgf_real):
                 max_confidence = face_is_real[i]['confidence']
                 index_confidence_face = i
     return embedding_objs[0]['embedding'],face_is_real[index_confidence_face]["is_real"]
+
+def detect_face(image):
+    boxes, scores, distances = [], [], []
+    face_detected = DeepFace.extract_faces(
+        img_path = image,
+        detector_backend = "yolov8",
+        align = True,
+        expand_percentage = FACE_EXT,
+        anti_spoofing = True,
+    )
+    
+    for i in range(len(face_detected)):
+        score = face_detected[i]['confidence']
+        spoofing = face_detected[i]['is_real']
+        
+        if score < CONF_THRESHOLD or not spoofing:
+            break
+        scores.append(score)
+        x, y, w, h, le, re = face_detected[i]['facial_area'].values()
+        xmin, ymin, xmax, ymax = x, y, x+w, y+h
+    
+        distance = distance_face_to_camera((xmin, ymin, xmax, ymax), image.shape[1])
+        
+        distances.append(distance)
+        boxes.append([x, y, w, h])
+    return boxes, np.array(scores), np.array(distances)
 
 def adjust_gamma(image, gamma=1.0):
     '''
@@ -251,6 +281,9 @@ def DetectDirection(landmark, threshold=LEFT_RIGHT_FACE_THRESHOLD):
             result = "left"
     
     return result
+
+
+
 
 def check_face_left_right(img_decode):
     '''
