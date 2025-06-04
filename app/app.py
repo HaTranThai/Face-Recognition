@@ -28,11 +28,11 @@ tags_metadata = [
 ]
 # from qdrant_db import *
 # docs_url=None, redoc_url=None
-app = FastAPI(openapi_tags=tags_metadata, docs_url=None, redoc_url=None)
+app = FastAPI(openapi_tags=tags_metadata)
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int( os.getenv("QDRANT_PORT", "6333"))
-THRESHOLD_PASS = 0.48
+THRESHOLD_PASS = 0.54
 THRESHOLD_SEARCH = 0.54
 
 client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
@@ -224,6 +224,7 @@ async def insert_point(data:InsertPoint):
                             payload=payload
                 )
         client.upsert(collection_name=collection_name, points=[point])
+        
         return JSONResponse(status_code=201, content={"message": "Point inserted"})
     except Exception as e:
         return JSONResponse(status_code=404, content={"message": str(e)})
@@ -245,7 +246,7 @@ async def search_point(data: SearchPoint):
         return JSONResponse(status_code=404, content={"message": "Embedding not found or invalid!"})
     
     try:
-        result = client.search(collection_name=collection_name, query_vector=vector_embedding, limit=1, query_filter = models.Filter(
+        result = client.search(collection_name=collection_name, query_vector=vector_embedding, limit=5, query_filter = models.Filter(
             must=[
                 models.FieldCondition(
                     key="store_id",
@@ -257,15 +258,18 @@ async def search_point(data: SearchPoint):
 
         data = [(i.score, i.payload) for i in result if i.score >= THRESHOLD_PASS]
         
+        print("Data search: ", data)
+        
         if len(data) == 0:
             return JSONResponse(status_code=200, content={"message": "Point not found", "data": []})
         
         data_dict = {}
         for i in result:
-            if i.payload['id'] in data_dict:
-                data_dict[i.payload['id']] += 1
-            else:
-                data_dict[i.payload['id']] = 1
+            if i.score >= THRESHOLD_PASS:
+                if i.payload['id'] in data_dict:
+                    data_dict[i.payload['id']] += 1
+                else:
+                    data_dict[i.payload['id']] = 1
         
         print(data_dict)
         

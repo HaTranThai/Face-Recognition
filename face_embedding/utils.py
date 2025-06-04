@@ -10,6 +10,10 @@ import datetime
 import mediapipe as mp
 import math
 import requests
+import logging
+
+from io import BytesIO
+
 
 load_dotenv(dotenv_path=".env")
 
@@ -38,9 +42,25 @@ BLUR_THRESHOLD = int(os.getenv("BLUR_THRESHOLD"))
 
 LEFT_RIGHT_FACE_THRESHOLD = float(os.getenv("LEFT_RIGHT_FACE_THRESHOLD"))
 
+
+FACE_EXT = int(os.getenv("FACE_EXT"))
+CONF_THRESHOLD = float(os.getenv("CONF_THRESHOLD"))
+
 # Khởi tạo Mediapipe
 mp_face_mesh = mp.solutions.face_mesh
 mp_face_detection = mp.solutions.face_detection
+
+# Cấu hình logging
+logging.basicConfig(
+    level=logging.INFO,  # Đặt mức độ log
+    format="%(asctime)s - %(levelname)s - %(message)s",  # Định dạng log
+    datefmt="%Y-%m-%d %H:%M:%S",  # Định dạng thời gian
+    handlers=[
+        # logging.StreamHandler(),  # Gửi log ra màn hình
+        logging.FileHandler("./logs/face.log", mode="a")  # Gửi log vào file app.log
+    ]
+)
+logger = logging.getLogger(__name__)
 
 def get_embedding(imgf,imgf_real):
     """
@@ -71,6 +91,32 @@ def get_embedding(imgf,imgf_real):
                 index_confidence_face = i
     return embedding_objs[0]['embedding'],face_is_real[index_confidence_face]["is_real"]
 
+def detect_face(image):
+    boxes, scores, distances = [], [], []
+    face_detected = DeepFace.extract_faces(
+        img_path = image,
+        detector_backend = "yolov8",
+        align = True,
+        expand_percentage = FACE_EXT,
+        anti_spoofing = True,
+    )
+    
+    for i in range(len(face_detected)):
+        score = face_detected[i]['confidence']
+        spoofing = face_detected[i]['is_real']
+        
+        if score < CONF_THRESHOLD or not spoofing:
+            break
+        scores.append(score)
+        x, y, w, h, le, re = face_detected[i]['facial_area'].values()
+        xmin, ymin, xmax, ymax = x, y, x+w, y+h
+    
+        distance = distance_face_to_camera((xmin, ymin, xmax, ymax), image.shape[1])
+        
+        distances.append(distance)
+        boxes.append([x, y, w, h])
+    return boxes, np.array(scores), np.array(distances)
+
 def adjust_gamma(image, gamma=1.0):
     '''
     Tăng độ sáng của khuôn mặt
@@ -80,10 +126,28 @@ def adjust_gamma(image, gamma=1.0):
     table = np.array([(i / 255.0) ** invGamma * 255 for i in np.arange(0, 256)]).astype("uint8")
     return cv2.LUT(image, table)
 
-def save_face_image(data, face,id,name,is_checkin=True):
+def ensure_bucket_exists(s3_client, bucket_name: str):
+    """Ensure the bucket exists in MinIO."""
+    try:
+        s3_client.head_bucket(Bucket=bucket_name)
+        logger.info(f"Bucket {bucket_name} already exists")
+    except Exception:
+        s3_client.create_bucket(Bucket=bucket_name)
+        logger.info(f"Bucket {bucket_name} created")
+
+
+def save_face_image(s3_client, data, face, id, name,is_checkin=True):
     '''
     Lưu ảnh khuôn mặt vào thư mục tương ứng
     '''
+    # path to save checkin image of user
+    # CHECKIN_CUSTOMER_PATH = 'data_face_checkin_customer_images'
+    # CHECKIN_EMPLOYEE_PATH = 'data_face_checkin_employee_images'
+
+    # # path to save register image of user
+    # REGISTER_CUSTOMER_PATH = 'data_face_register_customer_images'
+    # REGISTER_EMPLOYEE_PATH = 'data_face_register_employee_images'
+    
     if is_checkin:
         if data.role == '0':
             folder_save = os.getenv("CHECKIN_CUSTOMER_PATH")
@@ -94,20 +158,37 @@ def save_face_image(data, face,id,name,is_checkin=True):
             folder_save = os.getenv("REGISTER_CUSTOMER_PATH")
         else:
             folder_save = os.getenv("REGISTER_EMPLOYEE_PATH")
-    # create folder to save face
-    if not os.path.exists(f'./{folder_save}'):
-        os.makedirs(f'./{folder_save}')
     
-    if not os.path.exists(f'./{folder_save}/{data.store_id}'):
-        os.makedirs(f'./{folder_save}/{data.store_id}')
+    ensure_bucket_exists(s3_client, folder_save)
     
     time_checkin = datetime.datetime.now().strftime("%Y_%m_%d")
-    
-    if not os.path.exists(f'./{folder_save}/{data.store_id}/{time_checkin}'):
-        os.makedirs(f'./{folder_save}/{data.store_id}/{time_checkin}')
-    
     second_checkin = datetime.datetime.now().strftime("%H_%M_%S")
-    cv2.imwrite(f'./{folder_save}/{data.store_id}/{time_checkin}/{id}_{name}_{second_checkin}.jpg', face)
+    file_name = f"{id}_{name}_{second_checkin}.jpg"
+    object_name = f"{data.store_id}/{time_checkin}/{file_name}"
+
+    # Chuyển ảnh OpenCV thành buffer
+    _, img_encoded = cv2.imencode('.jpg', face)
+    img_bytes = BytesIO(img_encoded.tobytes())
+    try:
+        s3_client.upload_fileobj(img_bytes, folder_save, object_name, ExtraArgs={'ContentType': 'image/jpeg'})
+        logger.info(f"Uploaded image to MinIO: {folder_save} - {object_name}")
+    except Exception as e:
+        logger.error(f"Failed to upload image to MinIO: {e}")
+    
+    # # create folder to save face
+    # if not os.path.exists(f'./{folder_save}'):
+    #     os.makedirs(f'./{folder_save}')
+    
+    # if not os.path.exists(f'./{folder_save}/{data.store_id}'):
+    #     os.makedirs(f'./{folder_save}/{data.store_id}')
+    
+    # time_checkin = datetime.datetime.now().strftime("%Y_%m_%d")
+    
+    # if not os.path.exists(f'./{folder_save}/{data.store_id}/{time_checkin}'):
+    #     os.makedirs(f'./{folder_save}/{data.store_id}/{time_checkin}')
+    
+    # second_checkin = datetime.datetime.now().strftime("%H_%M_%S")
+    # cv2.imwrite(f'./{folder_save}/{data.store_id}/{time_checkin}/{id}_{name}_{second_checkin}.jpg', face)
     
 def distance_face_to_camera(bbox_face, width_or) -> float:
     '''
@@ -201,6 +282,9 @@ def DetectDirection(landmark, threshold=LEFT_RIGHT_FACE_THRESHOLD):
     
     return result
 
+
+
+
 def check_face_left_right(img_decode):
     '''
     Kiểm tra xem khuôn mặt có nhìn thẳng vào camera hay không
@@ -293,10 +377,10 @@ def check_face_mask(model, img_decode, box):
     x,y,w,h = box
     x1, y1, x2, y2 = int(x), int(y), int(x+w), int(y+h)
     # mở rộng khuôn mặt ra FACE_EXTpx 
-    x1 = x1 - 40 if x1 - 40 > 0 else 0
-    y1 = y1 - 40 if y1 - 40 > 0 else 0
-    x2 = x2 + 40 if x2 + 40 < img_decode.shape[1] else img_decode.shape[1]
-    y2 = y2 + 40 if y2 + 40 < img_decode.shape[0] else img_decode.shape[0]
+    x1 = x1 - 80 if x1 - 80 > 0 else 0
+    y1 = y1 - 80 if y1 - 80 > 0 else 0
+    x2 = x2 + 80 if x2 + 80 < img_decode.shape[1] else img_decode.shape[1]
+    y2 = y2 + 80 if y2 + 80 < img_decode.shape[0] else img_decode.shape[0]
     
     face = img_decode[y1:y2, x1:x2]
     face = face.astype('uint8')
@@ -304,12 +388,20 @@ def check_face_mask(model, img_decode, box):
     # save face image
     # cv2.imwrite("face.jpg", face)
     
-    prediction = model.predict(face)
-    labels = prediction[0]
-    class_id = int(prediction[0].boxes[0].cls)
+    try:    
+        prediction = model.predict(face)
+        # with open("mask_detection.txt", "w") as f:
+        #     # f.write(str(prediction.boxes))
+        #     for result in prediction:
+        #         f.write(str(result.boxes))
+        labels = prediction[0]
+        # print(labels)
+        class_id = int(prediction[0].boxes[0].cls)
 
-    if class_id == 1 or class_id == 2:
-        return False, "Your face is wearing a mask! Please remove the mask"
+        if class_id == 1 or class_id == 2:
+            return False, "Your face is wearing a mask! Please remove the mask"
+    except:
+        return False, "Please checkin again!"
     return True, "Face is not wearing a mask"
 
 def cnc_clt_exist(store_id):
