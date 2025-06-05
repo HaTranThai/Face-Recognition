@@ -115,6 +115,7 @@ def detect_face(image):
         
         distances.append(distance)
         boxes.append([x, y, w, h])
+    
     return boxes, np.array(scores), np.array(distances)
 
 def adjust_gamma(image, gamma=1.0):
@@ -289,7 +290,6 @@ def check_face_left_right(img_decode):
     '''
     Kiểm tra xem khuôn mặt có nhìn thẳng vào camera hay không
     '''
-    
     with mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5) as face_mesh:
         results = face_mesh.process(cv2.cvtColor(img_decode, cv2.COLOR_BGR2RGB))
         if not results.multi_face_landmarks:

@@ -14,3 +14,4 @@ backup_image.img.gz
 */data_face_register_employee_images/*
 data/
 test/
+test.ipynb

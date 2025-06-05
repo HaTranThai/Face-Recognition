@@ -1,7 +1,7 @@
 from fastapi import FastAPI, File, UploadFile, Query, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-# from models.yolo import YOLOv8_face
+from models.yolo import YOLOv8_face
 from pydantic import BaseModel
 from deepface import DeepFace
 from ultralytics import YOLO as yolofacemask
@@ -53,25 +53,157 @@ logging.basicConfig(
     ]
 )
 
-# Giới hạn kết nối đồng thời 
-HTTP_SEMAPHORE = asyncio.Semaphore(5)  # Tối đa 5 kết nối HTTP đồng thời
-PROCESSING_SEMAPHORE = asyncio.Semaphore(5)  # Tối đa 5 xử lý hình ảnh đồng thời
+# Tối ưu semaphores cho 100+ requests đồng thời - Cấu hình siêu cao hiệu suất
+HTTP_SEMAPHORE = asyncio.Semaphore(200)  # Tăng lên 200 kết nối HTTP đồng thời
+PROCESSING_SEMAPHORE = asyncio.Semaphore(120)  # Tăng lên 120 xử lý hình ảnh đồng thời  
+FACE_DETECTION_SEMAPHORE = asyncio.Semaphore(100)  # Tăng face detection đồng thời lên 100
+EMBEDDING_SEMAPHORE = asyncio.Semaphore(80)  # Tăng embedding generation đồng thời lên 80
+BATCH_PROCESSING_SEMAPHORE = asyncio.Semaphore(150)  # Tăng batch processing lên 150
+DATABASE_SEMAPHORE = asyncio.Semaphore(120)  # Thêm semaphore cho database operations
+MEMORY_SEMAPHORE = asyncio.Semaphore(50)  # Semaphore để quản lý memory-intensive operations
 
 # S3 session bất đồng bộ
 s3_session = aioboto3.Session()
 
-# Client HTTP bất đồng bộ với cấu hình chung
-async def get_http_client():
-    return httpx.AsyncClient(timeout=30.0)
+# Global ThreadPoolExecutor để tái sử dụng - Tăng workers để xử lý 100+ concurrent requests
+CPU_EXECUTOR = ThreadPoolExecutor(max_workers=120, thread_name_prefix="FaceProcessing")
+IO_EXECUTOR = ThreadPoolExecutor(max_workers=200, thread_name_prefix="IOOperations")
+EMBEDDING_EXECUTOR = ThreadPoolExecutor(max_workers=80, thread_name_prefix="EmbeddingGen")
+DETECTION_EXECUTOR = ThreadPoolExecutor(max_workers=100, thread_name_prefix="FaceDetection")
 
-# Hàm bất đồng bộ xử lý detect_n_emb_face
+# Cấu hình HTTP client với connection pooling cao hiệu suất cho 100+ requests
+HTTP_CLIENT_LIMITS = httpx.Limits(
+    max_keepalive_connections=300,  # Tăng keepalive connections
+    max_connections=500,            # Tăng total connections
+    keepalive_expiry=300            # Giữ connection trong 5 phút
+)
+
+HTTP_CLIENT_POOL = None
+async def get_http_client():
+    global HTTP_CLIENT_POOL
+    if HTTP_CLIENT_POOL is None:
+        HTTP_CLIENT_POOL = httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=5.0, read=25.0, write=10.0),
+            limits=HTTP_CLIENT_LIMITS,
+            follow_redirects=True,
+            http2=True  # Enable HTTP/2 for better performance
+        )
+    return HTTP_CLIENT_POOL
+
+# Hàm tạo cache key cho ảnh
+def create_image_hash(img_base64: str, store_id: str) -> str:
+    """Tạo hash key duy nhất cho ảnh để cache"""
+    content = f"{img_base64[:100]}{store_id}"  # Lấy 100 ký tự đầu để tránh hash quá dài
+    return hashlib.md5(content.encode()).hexdigest()
+
+# Hàm cache-aware detect face - Cải thiện cho 100+ requests
+async def cached_detect_face(img_decode, cache_key: str):
+    """Detect face với timed cache để tránh tính toán lại"""
+    global DETECTION_TIMED_CACHE, CACHE_STATS
+    
+    # Kiểm tra timed cache trước
+    cached_result = DETECTION_TIMED_CACHE.get(cache_key)
+    if cached_result is not None:
+        CACHE_STATS["hits"] += 1
+        return cached_result
+    
+    CACHE_STATS["misses"] += 1
+    
+    # Sử dụng dedicated DETECTION_EXECUTOR
+    async with FACE_DETECTION_SEMAPHORE:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(DETECTION_EXECUTOR, detect_face, img_decode)
+    
+    # Cache kết quả với TTL
+    DETECTION_TIMED_CACHE.set(cache_key, result)
+    
+    return result
+
+# Hàm cache-aware embedding - Cải thiện cho 100+ requests
+async def cached_get_embedding(face, img_decode, cache_key: str):
+    """Tạo embedding với timed cache"""
+    global EMBEDDING_TIMED_CACHE, CACHE_STATS
+    
+    # Kiểm tra timed cache
+    cached_result = EMBEDDING_TIMED_CACHE.get(cache_key)
+    if cached_result is not None:
+        CACHE_STATS["hits"] += 1
+        return cached_result
+    
+    CACHE_STATS["misses"] += 1
+    
+    # Sử dụng dedicated EMBEDDING_EXECUTOR
+    async with EMBEDDING_SEMAPHORE:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(EMBEDDING_EXECUTOR, get_embedding, face, img_decode)
+    
+    # Cache kết quả với TTL
+    EMBEDDING_TIMED_CACHE.set(cache_key, result)
+    
+    return result
+
+# Cache cho embeddings và detection results - Tăng cache size cho 100+ requests
+EMBEDDING_CACHE = {}
+DETECTION_CACHE = {}
+CACHE_MAX_SIZE = 2000  # Tăng cache size lên 2000
+CACHE_STATS = {"hits": 0, "misses": 0}  # Thêm cache statistics
+
+# LRU Cache cho các operations thường xuyên
+from functools import lru_cache
+from collections import OrderedDict
+
+class TimedCache:
+    """Cache với TTL (Time To Live) để tự động xóa entries cũ"""
+    def __init__(self, max_size=2000, ttl=3600):  # TTL = 1 hour
+        self.cache = OrderedDict()
+        self.timestamps = {}
+        self.max_size = max_size
+        self.ttl = ttl
+    
+    def get(self, key):
+        if key in self.cache:
+            # Kiểm tra TTL
+            if time.time() - self.timestamps[key] < self.ttl:
+                # Move to end (most recently used)
+                self.cache.move_to_end(key)
+                return self.cache[key]
+            else:
+                # TTL expired, remove
+                del self.cache[key]
+                del self.timestamps[key]
+        return None
+    
+    def set(self, key, value):
+        # Remove oldest if cache is full
+        while len(self.cache) >= self.max_size:
+            oldest_key = next(iter(self.cache))
+            del self.cache[oldest_key]
+            del self.timestamps[oldest_key]
+        
+        self.cache[key] = value
+        self.timestamps[key] = time.time()
+        self.cache.move_to_end(key)
+
+# Khởi tạo timed caches
+DETECTION_TIMED_CACHE = TimedCache(max_size=1000, ttl=1800)  # 30 minutes
+EMBEDDING_TIMED_CACHE = TimedCache(max_size=1000, ttl=3600)  # 60 minutes
+
+# Client HTTP bất đồng bộ với cấu hình chung - tối ưu cho 100+ requests
+async def get_http_client():
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(30.0, connect=5.0, read=25.0, write=10.0),
+        limits=HTTP_CLIENT_LIMITS,
+        http2=True
+    )
+
+# Hàm bất đồng bộ xử lý detect_n_emb_face với tối ưu cao
 async def async_detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
     """
-    Phiên bản async của detect_n_emb_face, sử dụng ThreadPoolExecutor 
-    cho các tác vụ nặng về CPU (xử lý hình ảnh) và cải tiến song song
+    Phiên bản async của detect_n_emb_face, tối ưu hóa cho hiệu suất cao
+    với global thread pools và xử lý song song tối đa
     """
     async with PROCESSING_SEMAPHORE:
-        # Sử dụng hàm song song để cải thiện hiệu suất
+        # Sử dụng hàm song song đã được tối ưu hóa
         return await async_parallel_detect_n_emb_face(data, is_detect_face, is_checkin)
 
 # Hàm bất đồng bộ lưu ảnh vào S3/MinIO
@@ -188,47 +320,49 @@ async def async_cnc_clt_exist(store_id):
             except Exception as e:
                 logger.error(f"Error in async_cnc_clt_exist: {str(e)}")
                 return False
-
-# Hàm bất đồng bộ tìm kiếm khuôn mặt 
-async def async_search_face(collection_name, embedding, store_id):
+# Hàm bất đồng bộ kiểm tra và tạo collection - Tối ưu cho 100+ requests
+async def async_cnc_clt_exist(store_id):
     start_time = time.time()
     async with HTTP_SEMAPHORE:
-        data_search = {
-            "collection_name": collection_name,
-            "vector_embedding": embedding,
-            "store_id": store_id
-        }
-        
-        async with httpx.AsyncClient() as client:
-            try:
-                search_start = time.time()
-                response = await client.post(URL_SEARCH, json=data_search)
-                search_time = time.time() - search_start
-                total_time = time.time() - start_time
+        client = await get_http_client()
+        try:
+            # Kiểm tra collection
+            get_collections_start = time.time()
+            response = await client.get(URL_GET_CLT)
+            check_clt = response.json()['collections']
+            get_collections_time = time.time() - get_collections_start
+            logger.info(f"[TIMING] {store_id} - Get collections time: {get_collections_time:.3f}s")
+            
+            if f"{store_id}_Employees" not in check_clt or f"{store_id}_Customers" not in check_clt:
+                logger.info(f"Creating collections for store {store_id}")
+                # Tạo collections song song với shared client
+                create_collections_start = time.time()
+                tasks = [
+                    client.post(URL_CRE_CLT, json={"collection_name": f"{store_id}_Customers"}),
+                    client.post(URL_CRE_CLT, json={"collection_name": f"{store_id}_Employees"})
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                create_collections_time = time.time() - create_collections_start
+                logger.info(f"[TIMING] {store_id} - Create collections time: {create_collections_time:.3f}s")
                 
-                logger.info(f"[TIMING] {store_id} - Face search request time: {search_time:.3f}s")
-                logger.info(f"[TIMING] {store_id} - Total face search time: {total_time:.3f}s")
-                
-                return response.json()
-            except Exception as e:
-                logger.error(f"Error in async_search_face: {str(e)}")
-                return {"data": []}
-
-# Hàm trích xuất thông tin từ kết quả tìm kiếm
-def extract_face_info(search_result):
-    """Trích xuất thông tin khuôn mặt từ kết quả tìm kiếm."""
-    try:
-        if not search_result or 'data' not in search_result or not search_result['data']:
-            return "Unknown", "Unknown", "Unknown"
-        
-        search_db = search_result['data']
-        if not search_db or len(search_db) == 0:
-            return "Unknown", "Unknown", "Unknown"
-        
-        search_item = search_db[0]
-        if len(search_item) > 1 and isinstance(search_item[1], dict):
-            return (
-                search_item[1].get('id', "Unknown"), 
+                # Kiểm tra kết quả
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Failed to create collection: {str(result)}")
+                        return False
+                    if result.status_code != 201:
+                        logger.error(f"Failed to create collection with status {result.status_code}")
+                        return False
+            
+            total_time = time.time() - start_time
+            logger.info(f"[TIMING] {store_id} - Total collection check/create time: {total_time:.3f}s")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error in async_cnc_clt_exist: {str(e)}")
+            return False
+        finally:
+            await client.aclose()1].get('id', "Unknown"), 
                 search_item[1].get('name', "Unknown"), 
                 search_item[1].get('time_created', "Unknown")
             )
@@ -242,7 +376,7 @@ def extract_face_info(search_result):
 # nmsThreshold = 0.7
 # YOLOv8_face_detector = YOLOv8_face(modelpath, conf_thres=confThreshold, iou_thres=nmsThreshold)
 
-# model_face_mask = yolofacemask("./models/best_face_mask.pt")
+model_face_mask = yolofacemask("./models/best_face_mask.pt")
 logger = logging.getLogger(__name__)
 
 
@@ -337,7 +471,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
                 # Giải phóng bộ nhớ trước khi return
                 del contents, img_decode
                 gc.collect()
-                return False,JSONResponse(status_code=400, content={
+                return False,JSONResponse(content={
                     'status': 2,
                     'message': message_flr
                 })
@@ -350,7 +484,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
                 # Giải phóng bộ nhớ trước khi return
                 del contents, img_decode
                 gc.collect()
-                return False,JSONResponse(status_code=400, content={
+                return False,JSONResponse(content={
                     'status': 2,
                     'message': "Eyes are closed! Please open your eyes"
                 })
@@ -367,7 +501,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
                 gc.collect()
                 if is_checkin:
                     logger.warning(f"detect_n_emb_face - {data.store_id} - Error when detecting face! Please try again")
-                    return False,JSONResponse(status_code=500, content={
+                    return False,JSONResponse(content={
                         'status': 2,
                         'message': "Error when detecting face! Please try again"
                     })
@@ -386,7 +520,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
             del img_decode
         gc.collect()
         logger.warning(f"{data.store_id} - Error when decoding image: {str(e)}")
-        return False,JSONResponse(status_code=500, content={
+        return False,JSONResponse(content={
             'status': 2,
             'message': "Error when detecting face! Please try again"
         })
@@ -412,7 +546,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
                 del contents, img_decode
                 gc.collect()
                 logger.warning(f"{data.store_id} - Face is too close! Please move back")
-                return False,JSONResponse(status_code=400, content={
+                return False,JSONResponse(content={
                     'status': 2,
                     'message': "Face is too close! Please move back"
                 })
@@ -421,7 +555,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
                 del contents, img_decode
                 gc.collect()
                 logger.warning(f"{data.store_id} - Face is too far! Please move forward")
-                return False,JSONResponse(status_code=400, content={
+                return False,JSONResponse(content={
                     'status': 2,
                     'message': "Face is too far! Please move forward"
                 })
@@ -451,7 +585,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
                 del img_decode, face
                 gc.collect()
                 logger.warning(f"{data.store_id} - Face is not full! Please keep your face in the frame")
-                return False,JSONResponse(status_code=400, content={
+                return False,JSONResponse(content={
                     'status': 2,
                     'message': mess_full_face
                 })
@@ -464,7 +598,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
                 del img_decode, face
                 gc.collect()
                 logger.warning(f"{data.store_id} - Face is blur! Please keep your face in focus")
-                return False,JSONResponse(status_code=400, content={
+                return False,JSONResponse(content={
                     'status': 2,
                     'message': "Face is blur! Please keep your face in focus"
                 })
@@ -478,7 +612,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
                 del img_decode, face
                 gc.collect()
                 logger.warning(f"{data.store_id} - Face is not real! Please use your real face")
-                return False,JSONResponse(status_code=400, content={
+                return False,JSONResponse(content={
                     'status': 2,
                     'message': "Face is not real! Please use your real face"
                 })
@@ -487,7 +621,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
             del face, img_decode
             gc.collect()
             logger.warning(f"{data.store_id} - Error when encoding face: {str(e)}")
-            return False,JSONResponse(status_code=500, content={
+            return False,JSONResponse(content={
                 'status': 2,
                 # 'message': "Error when encoding face"
                 "message": "Error! Please try again"
@@ -504,7 +638,7 @@ def detect_n_emb_face(data, is_detect_face=True, is_checkin=True):
             del contents
         gc.collect()
         logger.warning(f"{data.store_id} - Error in face processing: {str(e)}")
-        return False, JSONResponse(status_code=500, content={
+        return False, JSONResponse(content={
             'status': 2,
             'message': "Error when processing face! Please try again"
         })
@@ -515,16 +649,6 @@ async def async_parallel_detect_n_emb_face(data, is_detect_face=True, is_checkin
     Phiên bản song song của detect_n_emb_face, thực hiện các kiểm tra điều kiện đồng thời
     """
     function_start_time = time.time()
-    
-    # Initialize timing variables
-    parallel_checks_time = 0
-    face_detection_time = 0
-    distance_check_time = 0
-    face_crop_time = 0
-    face_quality_checks_time = 0
-    gamma_adjust_time = 0
-    embedding_time = 0
-    
     try:
         # Giải mã ảnh
         decode_start = time.time()
@@ -557,7 +681,7 @@ async def async_parallel_detect_n_emb_face(data, is_detect_face=True, is_checkin
                     del contents, img_decode
                     gc.collect()
                     logger.warning(f"{data.store_id} - Face is not aligned properly: {message_flr}")
-                    return False, JSONResponse(status_code=400, content={
+                    return False, JSONResponse(content={
                         'status': 2,
                         'message': message_flr
                     })
@@ -570,7 +694,7 @@ async def async_parallel_detect_n_emb_face(data, is_detect_face=True, is_checkin
                     del contents, img_decode
                     gc.collect()
                     logger.warning(f"async_parallel_detect_n_emb_face - {data.store_id} - Eyes are closed! Please open your eyes")
-                    return False, JSONResponse(status_code=400, content={
+                    return False, JSONResponse(content={
                         'status': 2,
                         'message': "Eyes are closed! Please open your eyes"
                     })
@@ -589,22 +713,12 @@ async def async_parallel_detect_n_emb_face(data, is_detect_face=True, is_checkin
                 gc.collect()
                 logger.warning(f"async_parallel_detect_n_emb_face - {data.store_id} - Error when detecting face: {str(e)}")
                 if is_checkin:
-                    return False, JSONResponse(status_code=500, content={
+                    return False, JSONResponse(content={
                         'status': 2,
                         'message': "Error when detecting face! Please try again"
                     })
                 else:
-                    # Create timing info for early return
-                    timing_info = {
-                        'face_detection_time': face_detection_time,
-                        'distance_check_time': 0,
-                        'face_crop_time': 0,
-                        'face_quality_checks_time': 0,
-                        'gamma_adjust_time': 0,
-                        'embedding_time': 0,
-                        'parallel_checks_time': 0
-                    }
-                    return True, (None, img_decode, timing_info)
+                    return True, (None, img_decode)
         else:
             scores = [0.9]
             img_size = img_decode.shape
@@ -617,7 +731,7 @@ async def async_parallel_detect_n_emb_face(data, is_detect_face=True, is_checkin
             del img_decode
         gc.collect()
         logger.warning(f"{data.store_id} - Error when decoding image: {str(e)}")
-        return False, JSONResponse(status_code=500, content={
+        return False, JSONResponse(content={
             'status': 2,
             'message': "Error when detecting face! Please try again"
         })
@@ -647,7 +761,7 @@ async def async_parallel_detect_n_emb_face(data, is_detect_face=True, is_checkin
                 del contents, img_decode
                 gc.collect()
                 logger.warning(f"{data.store_id} - Face is too close! Please move back")
-                return False, JSONResponse(status_code=400, content={
+                return False, JSONResponse(content={
                     'status': 2,
                     'message': "Face is too close! Please move back"
                 })
@@ -656,7 +770,7 @@ async def async_parallel_detect_n_emb_face(data, is_detect_face=True, is_checkin
                 del contents, img_decode
                 gc.collect()
                 logger.warning(f"{data.store_id} - Face is too far! Please move forward")
-                return False, JSONResponse(status_code=400, content={
+                return False, JSONResponse(content={
                     'status': 2,
                     'message': "Face is too far! Please move forward"
                 })
@@ -694,7 +808,7 @@ async def async_parallel_detect_n_emb_face(data, is_detect_face=True, is_checkin
                     del img_decode, face
                     gc.collect()
                     logger.warning(f"{data.store_id} - Face is not full! Please keep your face in the frame")
-                    return False, JSONResponse(status_code=400, content={
+                    return False, JSONResponse(content={
                         'status': 2,
                         'message': mess_full_face
                     })
@@ -706,7 +820,7 @@ async def async_parallel_detect_n_emb_face(data, is_detect_face=True, is_checkin
                     del img_decode, face
                     gc.collect()
                     logger.warning(f"{data.store_id} - Face is blur! Please keep your face in focus")
-                    return False, JSONResponse(status_code=400, content={
+                    return False, JSONResponse(content={
                         'status': 2,
                         'message': "Face is blur! Please keep your face in focus"
                     })
@@ -732,7 +846,7 @@ async def async_parallel_detect_n_emb_face(data, is_detect_face=True, is_checkin
                     del img_decode, face
                     gc.collect()
                     logger.warning(f"{data.store_id} - Face is not real! Please use your real face")
-                    return False, JSONResponse(status_code=400, content={
+                    return False, JSONResponse(content={
                         'status': 2,
                         'message': "Face is not real! Please use your real face"
                     })
@@ -741,7 +855,7 @@ async def async_parallel_detect_n_emb_face(data, is_detect_face=True, is_checkin
             del face, img_decode
             gc.collect()
             logger.warning(f"{data.store_id} - Error when encoding face: {str(e)}")
-            return False, JSONResponse(status_code=500, content={
+            return False, JSONResponse(content={
                 'status': 2,
                 'message': "Error! Please try again"
             })
@@ -749,19 +863,7 @@ async def async_parallel_detect_n_emb_face(data, is_detect_face=True, is_checkin
         total_function_time = time.time() - function_start_time
         logger.info(f"[TIMING] {data.store_id} - Total face detection and embedding time: {total_function_time:.3f}s")
         logger.info(f"{data.store_id} - Face is real")
-        
-        # Return timing information along with results
-        timing_info = {
-            'face_detection_time': face_detection_time if is_detect_face else 0,
-            'distance_check_time': distance_check_time if is_checkin else 0,
-            'face_crop_time': face_crop_time if is_detect_face else 0,
-            'face_quality_checks_time': face_quality_checks_time if is_checkin else 0,
-            'gamma_adjust_time': gamma_adjust_time if is_checkin else 0,
-            'embedding_time': embedding_time if is_detect_face else 0,
-            'parallel_checks_time': parallel_checks_time if is_checkin else 0
-        }
-        
-        return True, (emb, img_decode, timing_info)
+        return True, (emb, img_decode)
     except Exception as e:
         # Đảm bảo giải phóng bộ nhớ khi có lỗi
         if 'img_decode' in locals():
@@ -774,7 +876,7 @@ async def async_parallel_detect_n_emb_face(data, is_detect_face=True, is_checkin
         total_function_time = time.time() - function_start_time
         logger.info(f"[TIMING] {data.store_id} - Total function time (error): {total_function_time:.3f}s")
         logger.warning(f"{data.store_id} - Error in face processing: {str(e)}")
-        return False, JSONResponse(status_code=500, content={
+        return False, JSONResponse(content={
             'status': 2,
             'message': "Error when processing face! Please try again"
         })
@@ -891,9 +993,7 @@ async def face_recog_img_base64(data: FaceRecog):
         
         if not check_condition_face:
             logger.warning(f"face_recog_img_base64 - {data.store_id} - {message_condition_face}")
-            # Giải phóng bộ nhớ trước khi return
-            gc.collect()
-            return JSONResponse(status_code=400, content={
+            return JSONResponse(content={
                 'status': 2,
                 'message': message_condition_face
             })
@@ -906,55 +1006,33 @@ async def face_recog_img_base64(data: FaceRecog):
             collection_name = f'{data.store_id}_Customers'
             is_checkin = False
         else:
-            # Giải phóng bộ nhớ trước khi return
-            gc.collect()
-            return JSONResponse(status_code=400, content={
+            return JSONResponse(content={
                 'status': 2,
                 'message': "Invalid role"
             })
             
         # Thực hiện song song việc kiểm tra collection và phát hiện khuôn mặt
         parallel_start = time.time()
-        collection_task_time_start = time.time()
         collection_task = async_cnc_clt_exist(data.store_id)
-        collection_task_time = time.time() - collection_task_time_start
-        
-        detect_task_start = time.time()
         detect_task = async_parallel_detect_n_emb_face(data, is_checkin=is_checkin)
-        detect_task_time = time.time() - detect_task_start
-        
         
         # Đợi kết quả song song
         collection_exists, (check_emb, message) = await asyncio.gather(collection_task, detect_task)
-        parallel_time = round(time.time() - parallel_start,4)
+        parallel_time = time.time() - parallel_start
         logger.info(f"[TIMING] {data.store_id} - Parallel collection check + face detection time: {parallel_time:.3f}s")
         
         if not collection_exists:
             logger.warning(f"face_recog_img_base64 - {data.store_id} - Error when create collection")
-            # Giải phóng bộ nhớ trước khi return
-            gc.collect()
-            return JSONResponse(status_code=500, content={
+            return JSONResponse(content={
                 'status': 2,
                 'message': "Error when create collection"
             })
         
         if not check_emb:
             logger.warning(f"face_recog_img_base64 - {data.store_id} - {message}")
-            # Giải phóng bộ nhớ trước khi return
-            gc.collect()
             return message
         
-        emb, img_decode, timing_info = message
-        
-        # Extract timing information
-        face_detection_time = timing_info.get('face_detection_time', 0)
-        distance_check_time = timing_info.get('distance_check_time', 0)
-        face_crop_time = timing_info.get('face_crop_time', 0)
-        face_quality_checks_time = timing_info.get('face_quality_checks_time', 0)  
-        gamma_adjust_time = timing_info.get('gamma_adjust_time', 0)
-        embedding_time = timing_info.get('embedding_time', 0)
-        parallel_checks_time = timing_info.get('parallel_checks_time', 0)
-        is_detect_face = True  # This is always True for this endpoint
+        emb, img_decode = message
         
         # Nếu không có embedding (ví dụ: không phát hiện khuôn mặt)
         if emb is None:
@@ -970,28 +1048,12 @@ async def face_recog_img_base64(data: FaceRecog):
             gc.collect()
             
             total_time = time.time() - request_start_time
-            detail_time = {
-                'condition_check': condition_check_time,
-                'parallel_checks': parallel_time,
-                'collection_task': collection_task_time,
-                'detect_task': detect_task_time,
-                'face_detection': face_detection_time if is_detect_face else 0,
-                'distance_check': distance_check_time if is_checkin else 0,
-                'face_crop': face_crop_time if is_detect_face else 0,
-                'face_quality_checks': face_quality_checks_time if is_checkin else 0,
-                'gamma_adjustment': gamma_adjust_time if is_checkin else 0,
-                'embedding_generation': embedding_time if is_detect_face else 0,
-                'save_unknown_face': save_time,
-                'save_recognized_face': 0
-            }
-            logger.info(f"[TIMING] {data.store_id} - Detail time: {detail_time}")
             logger.info(f"[TIMING] {data.store_id} - Total request time (no embedding): {total_time:.3f}s")
             
-            return JSONResponse(status_code=200, content={
+            return JSONResponse(content={
                 'status': 1,
                 'id': "Unknown",
                 'name': "Unknown",
-                # 'detail_time': detail_time
             })
         
         # Tìm kiếm khuôn mặt - bất đồng bộ
@@ -1010,28 +1072,12 @@ async def face_recog_img_base64(data: FaceRecog):
             gc.collect()
             
             total_time = time.time() - request_start_time
-            detail_time = {
-                'condition_check': condition_check_time,
-                'parallel_checks': parallel_time,
-                'collection_task': collection_task_time,
-                'detect_task': detect_task_time,
-                'face_detection': face_detection_time if is_detect_face else 0,
-                'distance_check': distance_check_time if is_checkin else 0,
-                'face_crop': face_crop_time if is_detect_face else 0,
-                'face_quality_checks': face_quality_checks_time if is_checkin else 0,
-                'gamma_adjustment': gamma_adjust_time if is_checkin else 0,
-                'embedding_generation': embedding_time if is_detect_face else 0,
-                'save_unknown_face': 0,  # No save time for face not found case
-                'save_recognized_face': 0
-            }
-            logger.info(f"[TIMING] {data.store_id} - Detail time: {detail_time}")
             logger.info(f"[TIMING] {data.store_id} - Total request time (face not found): {total_time:.3f}s")
             logger.warning(f"face_recog_img_base64 - {data.store_id} - Face is not existed! Please register your face or checkin again")
             
-            return JSONResponse(status_code=404, content={
+            return JSONResponse(content={
                 'status': 0,
-                'message': "Face is not existed! Please register your face or checkin again",
-                'detail_time': detail_time
+                'message': "Face is not existed! Please register your face or checkin again"
             })
         
         # Lưu ảnh - bất đồng bộ
@@ -1042,21 +1088,6 @@ async def face_recog_img_base64(data: FaceRecog):
         
         # Log và trả về kết quả
         total_time = time.time() - request_start_time
-        detail_time = {
-            'condition_check': condition_check_time,
-            'parallel_checks': parallel_time,
-            'collection_task': collection_task_time,
-            'detect_task': detect_task_time,
-            'face_detection': face_detection_time if is_detect_face else 0,
-            'distance_check': distance_check_time if is_checkin else 0,
-            'face_crop': face_crop_time if is_detect_face else 0,
-            'face_quality_checks': face_quality_checks_time if is_checkin else 0,
-            'gamma_adjustment': gamma_adjust_time if is_checkin else 0,
-            'embedding_generation': embedding_time if is_detect_face else 0,
-            'save_unknown_face': save_time if emb is None else 0,
-            'save_recognized_face': save_time if emb is not None else 0
-        }
-        logger.info(f"[TIMING] {data.store_id} - Detail time: {detail_time}")
         logger.info(f"[TIMING] {data.store_id} - Total successful request time: {total_time:.3f}s")
         logger.info(f"face_recog_img_base64 - status: 1, id: {face_id}, name: {name}")
         logger.info(f"face_recog_img_base64 - {data.store_id} - Face is recognized successfully")
@@ -1065,33 +1096,16 @@ async def face_recog_img_base64(data: FaceRecog):
         del img_decode, emb
         gc.collect()
         
-        return JSONResponse(status_code=200, content={
+        return JSONResponse(content={
             'status': 1,
             'id': face_id,
             'name': name,
-            # 'detail_time': detail_time
         })
         
     except Exception as e:
         total_time = time.time() - request_start_time
         logger.error(f"[TIMING] {data.store_id} - Total request time (error): {total_time:.3f}s")
         logger.error(f"face_recog_img_base64 - {data.store_id} - Error: {str(e)}")
-        
-        # Create detail_time with available information
-        detail_time = {
-            'condition_check': condition_check_time if 'condition_check_time' in locals() else 0,
-            'parallel_checks': parallel_time if 'parallel_time' in locals() else 0,
-            'collection_task': collection_task_time if 'collection_task_time' in locals() else 0,
-            'detect_task': detect_task_time if 'detect_task_time' in locals() else 0,
-            'face_detection': 0,
-            'distance_check': 0,
-            'face_crop': 0,
-            'face_quality_checks': 0,
-            'gamma_adjustment': 0,
-            'embedding_generation': 0,
-            'save_unknown_face': 0,
-            'save_recognized_face': 0
-        }
         
         # Trong trường hợp lỗi, lưu ảnh với thông tin Unknown
         try:
@@ -1105,11 +1119,10 @@ async def face_recog_img_base64(data: FaceRecog):
             del img_decode
         gc.collect()
         
-        return JSONResponse(status_code=500, content={
+        return JSONResponse(content={
             'status': 1,
             'id': "Unknown",
             'name': "Unknown",
-            'detail_time': detail_time
         })
 
 @app.post("/face_recog_img_base64_batch",
@@ -1126,8 +1139,6 @@ async def face_recog_img_base64_batch(data_list: List[FaceRecog]):
             check_condition_face, message_condition_face = await async_check_condition(data, is_checkin=True)
             if not check_condition_face:
                 logger.warning(f"batch - {data.store_id} - {message_condition_face}")
-                # Giải phóng bộ nhớ trước khi return
-                gc.collect()
                 return
             
             # Xác định collection name và chế độ
@@ -1139,8 +1150,6 @@ async def face_recog_img_base64_batch(data_list: List[FaceRecog]):
                 is_checkin = False
             else:
                 logger.warning(f"batch - {data.store_id} - Invalid role")
-                # Giải phóng bộ nhớ trước khi return
-                gc.collect()
                 return
             
             # Thực hiện song song việc kiểm tra collection và phát hiện khuôn mặt
@@ -1152,17 +1161,13 @@ async def face_recog_img_base64_batch(data_list: List[FaceRecog]):
             
             if not collection_exists:
                 logger.warning(f"batch - {data.store_id} - Error with collection")
-                # Giải phóng bộ nhớ trước khi return
-                gc.collect()
                 return
             
             if not check_emb:
                 logger.warning(f"batch - {data.store_id} - {message}")
-                # Giải phóng bộ nhớ trước khi return
-                gc.collect()
                 return
             
-            emb, img_decode, timing_info = message
+            emb, img_decode = message
             
             # Nếu không có embedding
             if emb is None:
@@ -1207,7 +1212,7 @@ async def face_recog_img_base64_batch(data_list: List[FaceRecog]):
     # Đảm bảo giải phóng bộ nhớ
     gc.collect()
     
-    return JSONResponse(status_code=200, content={
+    return JSONResponse(content={
         'status': 1,
         'message': "Successfully processed batch"
     })
@@ -1248,9 +1253,7 @@ async def create_face_img_base64(data: CreateFace):
     
     if not check_condition_face:
         logger.warning(f"{store_id} - {message_condition_face}")
-        # Giải phóng bộ nhớ trước khi return
-        gc.collect()
-        return JSONResponse(status_code=400, content={
+        return JSONResponse(content={
             'status': 2,
             'message': message_condition_face
         })
@@ -1263,9 +1266,7 @@ async def create_face_img_base64(data: CreateFace):
         collection_name = f'{store_id}_Customers'
         is_checkin = False
     else:
-        # Giải phóng bộ nhớ trước khi return
-        gc.collect()
-        return JSONResponse(status_code=400, content={
+        return JSONResponse(content={
             'status': 2,
             'message': "Invalid role"
         })
@@ -1282,20 +1283,16 @@ async def create_face_img_base64(data: CreateFace):
     
     if not collection_exists:
         logger.warning(f"create_face_img_base64 - {store_id} - Error when create collection")
-        # Giải phóng bộ nhớ trước khi return
-        gc.collect()
-        return JSONResponse(status_code=500, content={
+        return JSONResponse(content={
             'status': 2,
             'message': "Error! Please try again"
         })
     
     if not check_emb:
         logger.warning(f"create_face_img_base64 - {store_id} - {message}")
-        # Giải phóng bộ nhớ trước khi return
-        gc.collect()
         return message
     
-    emb, img_decode, timing_info = message
+    emb, img_decode = message
     
     # Nếu không có embedding
     if emb is None:
@@ -1308,11 +1305,7 @@ async def create_face_img_base64(data: CreateFace):
         logger.info(f"[TIMING] {store_id} - Total create face time (no embedding): {total_time:.3f}s")
         logger.info(f"create_face_img_base64 - {store_id} - Create face {name_value} with id {id_value} successfully without embedding")
         
-        # Giải phóng bộ nhớ trước khi return
-        del img_decode
-        gc.collect()
-        
-        return JSONResponse(status_code=200, content={
+        return JSONResponse(content={
             'status': 1,
             'message': f'Create face {name_value} with id {id_value} successfully'
         })
@@ -1327,7 +1320,7 @@ async def create_face_img_base64(data: CreateFace):
         total_time = time.time() - create_face_start_time
         logger.info(f"[TIMING] {store_id} - Total create face time (face exists): {total_time:.3f}s")
         logger.warning(f"create_face_img_base64 - {store_id} - Face is existed! Please use another face")
-        return JSONResponse(status_code=409, content={
+        return JSONResponse(content={
             'status': 0,
             'message': "Face is existed! Please use another face"
         })
@@ -1349,7 +1342,7 @@ async def create_face_img_base64(data: CreateFace):
         logging.error(response.content)
         if response.status_code != 201:
             logger.warning(f"create_face_img_base64 - {store_id} - Error when insert face")
-            return JSONResponse(status_code=500, content={
+            return JSONResponse(content={
                 'status': 2,
                 'message': "Error when insert face"
             })
@@ -1367,7 +1360,7 @@ async def create_face_img_base64(data: CreateFace):
     logger.info(f"[TIMING] {store_id} - Total successful create face time: {total_time:.3f}s")
     logger.info(f"create_face_img_base64 - {store_id} - Create face {name_value} with id {id_value} successfully")
     
-    return JSONResponse(status_code=201, content={
+    return JSONResponse(content={
         'status': 1,
         'message': f'Create face {name_value} with id {id_value} successfully'
     })
@@ -1606,7 +1599,7 @@ async def create_face_img_base64_batch_customers(data_list: List[CreateFace]):
     # Đảm bảo giải phóng bộ nhớ
     gc.collect()
     
-    return JSONResponse(status_code=200, content={
+    return JSONResponse(content={
         'status': 1,
         'message': "Successfully processed batch customers"
     })
@@ -1649,7 +1642,7 @@ async def delete_employee_face(data: DeleteFace):
         total_time = time.time() - delete_start_time
         logger.info(f"[TIMING] {store_id} - Total delete face time (missing id): {total_time:.3f}s")
         logger.error(f"delete_employee_face - {store_id} - id is required")
-        return JSONResponse(status_code=400, content={
+        return JSONResponse(content={
             'status': 2,
             'message': "id is required"
         })
@@ -1671,14 +1664,14 @@ async def delete_employee_face(data: DeleteFace):
     if check.status_code != 200:
         logger.info(f"[TIMING] {store_id} - Total delete face time (not found): {total_time:.3f}s")
         logger.error(f"delete_employee_face - {store_id} - Error when delete face")
-        return JSONResponse(status_code=404, content={
+        return JSONResponse(content={
             'status': 0,
             'message': f"Not found employee with id {id_em}"
         })
     
     logger.info(f"[TIMING] {store_id} - Total successful delete face time: {total_time:.3f}s")
     logger.info(f"delete_employee_face - {store_id} - Delete face with id {id_em} successfully")
-    return JSONResponse(status_code=200, content={
+    return JSONResponse(content={
         'status': 1,
         'message': f'Delete face with id {id_em} successfully'
     })
@@ -1813,7 +1806,7 @@ async def backup_db_one(store_id,background_tasks: BackgroundTasks):
     if not os.path.exists(file_path_customer) or not os.path.exists(file_path_employee):
         total_time = time.time() - backup_start_time
         logger.info(f"[TIMING] {store_id} - Total backup time (snapshot not found): {total_time:.3f}s")
-        return JSONResponse(status_code=404, content={
+        return JSONResponse(content={
             'status': 0,
             'message': "Not found snapshot"
         })
@@ -1855,7 +1848,7 @@ async def backup_db_one(store_id,background_tasks: BackgroundTasks):
     except Exception as e:
         total_time = time.time() - backup_start_time
         logger.info(f"[TIMING] {store_id} - Total backup time (error): {total_time:.3f}s")
-        return JSONResponse(status_code=500, content={
+        return JSONResponse(content={
             'status': 2,
             'message': str(e)
         })
@@ -1896,7 +1889,7 @@ async def backup_all_db(background_tasks: BackgroundTasks):
         if not os.path.exists("./snapshots/"+file_path_customer) or not os.path.exists("./snapshots/"+file_path_employee):
             total_time = time.time() - backup_all_start_time
             logger.info(f"[TIMING] backup_all - Total backup time (snapshot not found): {total_time:.3f}s")
-            return JSONResponse(status_code=404, content={
+            return JSONResponse(content={
                 'status': 0,
                 'message': "Not found snapshot"
             })
@@ -1940,7 +1933,7 @@ async def backup_all_db(background_tasks: BackgroundTasks):
     except Exception as e:
         total_time = time.time() - backup_all_start_time
         logger.info(f"[TIMING] backup_all - Total backup all time (error): {total_time:.3f}s")
-        return JSONResponse(status_code=500, content={
+        return JSONResponse(content={
             'status': 2,
             'message': str(e)
         })
@@ -2013,7 +2006,7 @@ async def recover_db(file: UploadFile = File(..., description="File backup")):
                     if check.status_code != 200:
                         total_time = time.time() - recover_start_time
                         logger.info(f"[TIMING] recover_db - Total recovery time (snapshot error): {total_time:.3f}s")
-                        return JSONResponse(status_code=500, content={
+                        return JSONResponse(content={
                             'status': 2,
                             'message': check.json()['message']
                         })
@@ -2035,21 +2028,21 @@ async def recover_db(file: UploadFile = File(..., description="File backup")):
             total_time = time.time() - recover_start_time
             logger.info(f"[TIMING] recover_db - Total successful recovery time: {total_time:.3f}s")
             
-            return JSONResponse(status_code=200, content={
+            return JSONResponse(content={
                 'status': 1,
                 'message': "Recover database successfully"
             })
         except:
             total_time = time.time() - recover_start_time
             logger.info(f"[TIMING] recover_db - Total recovery time (cleanup warning): {total_time:.3f}s")
-            return JSONResponse(status_code=200, content={
+            return JSONResponse(content={
                 'status': 1,
                 'message': "Recover database successfully"
             })
     except Exception as e:
         total_time = time.time() - recover_start_time
         logger.info(f"[TIMING] recover_db - Total recovery time (error): {total_time:.3f}s")
-        return JSONResponse(status_code=500, content={
+        return JSONResponse(content={
             'status': 2,
             'message': str(e)
         })

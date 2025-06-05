@@ -2,7 +2,7 @@ from fastapi import FastAPI, status
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 from typing import Union, List
-from qdrant_client import QdrantClient, models
+from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.http.models import Distance, VectorParams, PointStruct
 from uuid import uuid4
 # import torch
@@ -35,7 +35,7 @@ QDRANT_PORT = int( os.getenv("QDRANT_PORT", "6333"))
 THRESHOLD_PASS = 0.54
 THRESHOLD_SEARCH = 0.54
 
-client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+client = AsyncQdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
 class CreateCollection(BaseModel):
     collection_name: str = None
@@ -61,12 +61,13 @@ class RecoverSnapshot(BaseModel):
     collection_name: Union[str, None] = ""
     snapshot_name: Union[str, None] = ""
 
-def _check_exist(collection_name):
-    return collection_name in [c.name for c in client.get_collections().collections]
+async def _check_exist(collection_name):
+    collections = await client.get_collections()
+    return collection_name in [c.name for c in collections.collections]
 
-def _get_points(collection_name, id):
+async def _get_points(collection_name, id):
     try:
-        res = client.scroll(
+        res = await client.scroll(
             collection_name=collection_name,
             scroll_filter=models.Filter(
                 must=[
@@ -76,10 +77,10 @@ def _get_points(collection_name, id):
                     )
                 ]
             )
-        )[0]
-        if len(res)==0:
+        )
+        if len(res[0])==0:
             return None
-        return res
+        return res[0]
     except Exception as e:
         return None
 
@@ -90,9 +91,10 @@ async def root():
 
 @app.get("/get_collections", tags=["Colection"])
 async def get_collections():
+    collections = await client.get_collections()
     return {
         'status': status.HTTP_200_OK,
-        'collections': [c.name for c in client.get_collections().collections]
+        'collections': [c.name for c in collections.collections]
     }
     
 @app.post("/create_collection", tags=["Colection"])
@@ -100,8 +102,8 @@ async def create_collection(data:CreateCollection):
     collection_name= data.collection_name
     if collection_name is None:
         return JSONResponse(status_code=404, content={"message": "Collection name not found!"})
-    if not _check_exist(collection_name):
-        client.create_collection(
+    if not await _check_exist(collection_name):
+        await client.create_collection(
             collection_name=collection_name,
             vectors_config=VectorParams(size=4096, distance=Distance.COSINE)
             )
@@ -112,31 +114,31 @@ async def create_collection(data:CreateCollection):
 @app.get('/create_snapshot/{collection_name}', tags=["Snapshot"])
 async def create_snapshot(collection_name):
     try:
-        snapshots = client.list_snapshots(collection_name=f"{collection_name}")
+        snapshots = await client.list_snapshots(collection_name=f"{collection_name}")
         for snapshot in snapshots:
-            client.delete_snapshot(
+            await client.delete_snapshot(
                 collection_name=collection_name, snapshot_name=snapshot.name
             )
-        snapshot_info  = client.create_snapshot(collection_name=collection_name)
+        snapshot_info = await client.create_snapshot(collection_name=collection_name)
         return snapshot_info
     except Exception as e:
         return str(e)
 
 @app.get('/all_snapshots/{collection_name}', tags=["Snapshot"])
 async def all_snapshots(collection_name):
-    snapshots = client.list_snapshots(collection_name=collection_name)
+    snapshots = await client.list_snapshots(collection_name=collection_name)
     return snapshots
 
 @app.get('/recover_snapshot_local/{collection_name}', tags=["Snapshot"])
 async def recover_snapshot_local(collection_name):
     try:
         if collection_name == "Employees" or collection_name == "Customers":
-            snapshots = client.list_snapshots(collection_name=collection_name)
+            snapshots = await client.list_snapshots(collection_name=collection_name)
             if len(snapshots) == 0:
-                snapshot= client.create_snapshot(collection_name=collection_name)
-                snapshots = client.list_snapshots(collection_name=collection_name)
+                snapshot = await client.create_snapshot(collection_name=collection_name)
+                snapshots = await client.list_snapshots(collection_name=collection_name)
             snapshot = snapshots[0]
-            client.recover_snapshot(
+            await client.recover_snapshot(
                 collection_name=collection_name, location=f"file:///qdrant/snapshots/{collection_name}/{snapshot.name}"
             )
             return JSONResponse(status_code=200, content={"message": "Recover snapshot successfully", 
@@ -157,12 +159,12 @@ async def recover_snapshot(data: RecoverSnapshot):
         if collection_name not in ["Employees", "Customers"]:
             return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
 
-        if not _check_exist(collection_name):
-            client.create_collection(
+        if not await _check_exist(collection_name):
+            await client.create_collection(
                 collection_name=collection_name,
                 vectors_config=VectorParams(size=4096, distance=Distance.COSINE)
                 )
-        client.recover_snapshot(
+        await client.recover_snapshot(
             collection_name=collection_name, location=f"file:///qdrant/snapshots/{path_snapshot}"
         )
         print(data)
@@ -192,7 +194,7 @@ async def insert_point(data:InsertPoint):
     if collection_name == "" or collection_name is None:
         return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
     
-    if not _check_exist(collection_name):
+    if not await _check_exist(collection_name):
         return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
     
     if embedding is None or len(embedding) != 4096:
@@ -212,7 +214,7 @@ async def insert_point(data:InsertPoint):
     }
     
     if is_update_id:
-        p = _get_points(collection_name, id)
+        p = await _get_points(collection_name, id)
         if p is not None:
             _id = p[0].id
             payload = p[0].payload
@@ -223,7 +225,7 @@ async def insert_point(data:InsertPoint):
                             vector=embedding,
                             payload=payload
                 )
-        client.upsert(collection_name=collection_name, points=[point])
+        await client.upsert(collection_name=collection_name, points=[point])
         
         return JSONResponse(status_code=201, content={"message": "Point inserted"})
     except Exception as e:
@@ -238,7 +240,7 @@ async def search_point(data: SearchPoint):
     if collection_name is None or collection_name == "":
         return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
     
-    if not _check_exist(collection_name):
+    if not await _check_exist(collection_name):
         return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
     
     # if vector_embedding is None or len(vector_embedding) != 128 or not all(isinstance(i, (int, float)) for i in vector_embedding) or not all(-1 <= i <= 1 for i in vector_embedding):
@@ -246,7 +248,7 @@ async def search_point(data: SearchPoint):
         return JSONResponse(status_code=404, content={"message": "Embedding not found or invalid!"})
     
     try:
-        result = client.search(collection_name=collection_name, query_vector=vector_embedding, limit=5, query_filter = models.Filter(
+        result = await client.search(collection_name=collection_name, query_vector=vector_embedding, limit=5, query_filter = models.Filter(
             must=[
                 models.FieldCondition(
                     key="store_id",
@@ -309,10 +311,10 @@ async def delete_collection(data: CreateCollection):
     collection_name = data.collection_name
     if collection_name is None:
         return JSONResponse(status_code=404, content={"message": "Collection name not found!"})
-    if not _check_exist(collection_name):
+    if not await _check_exist(collection_name):
         return JSONResponse(status_code=404, content={"message": "Collection name not found!"})
     try:
-        client.delete_collection(collection_name)
+        await client.delete_collection(collection_name)
         return JSONResponse(status_code=200, content={"message": "Collection deleted"})
     except Exception as e:
         return JSONResponse(status_code=404, content={"message": str(e)})
@@ -324,14 +326,14 @@ async def delete_point(data: DeletePoint):
     if collection_name is None or collection_name == "":
         return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
     
-    if not _check_exist(collection_name):
+    if not await _check_exist(collection_name):
         return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
     
     if id is None or id == "":
         return JSONResponse(status_code=404, content={"message": "ID not found or invalid!"})
     
     try:
-        client.delete(
+        await client.delete(
             collection_name=collection_name,
             points_selector=models.FilterSelector(
                 filter=models.Filter(
