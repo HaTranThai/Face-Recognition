@@ -350,6 +350,33 @@ async def delete_point(data: DeletePoint):
     except Exception as e:
         return JSONResponse(status_code=404, content={"message": str(e)})
 
+@app.get("/health", tags=["Health"])
+async def health_check():
+    """Health check endpoint for database API."""
+    try:
+        # Test connection to Qdrant
+        collections = await client.get_collections()
+        
+        return {
+            "status": "healthy",
+            "message": "Database API is running",
+            "qdrant_connection": "connected",
+            "collections_count": len(collections.collections),
+            "qdrant_host": QDRANT_HOST,
+            "qdrant_port": QDRANT_PORT
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": f"Database connection failed: {str(e)}",
+                "qdrant_connection": "disconnected",
+                "qdrant_host": QDRANT_HOST,
+                "qdrant_port": QDRANT_PORT
+            }
+        )
+
 # if __name__ == "__main__":
 #    import uvicorn
 #    uvicorn.run(app, host="0.0.0.0", port=7005) # chạy ứng dụng với uvicorn, host là ip và port là cổng

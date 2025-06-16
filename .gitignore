@@ -15,3 +15,8 @@ backup_image.img.gz
 data/
 test/
 test.ipynb
+qdrant_storage/
+snapshots/
+/app/snapshots/
+/app/miniodata/
+**/__pycache__/

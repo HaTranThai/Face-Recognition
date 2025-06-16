@@ -11,10 +11,11 @@ services:
     restart: always
     volumes:
       - qdrant_data:/qdrant/storage
+      - ./qdrant_storage:/qdrant/storage  # Mount actual data directory
       - ./snapshots:/qdrant/snapshots
 
   api_db:
-    build: ./app/
+    build: ./qdrant_database_FE/
     container_name: api_db-container
     networks:
       - network_face
@@ -22,8 +23,8 @@ services:
       - "127.0.0.1:7005:7005"
     restart: always
     volumes:
-      - ./app:/app
-    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7005", "--workers", "3"]
+      - ./qdrant_database_FE:/qdrant_database_FE
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7005", "--workers", "1"]
     depends_on:
       - qdrant
     environment:
@@ -32,7 +33,7 @@ services:
       - FASTAPI_PORT=7005
   
   api_fr:
-    build: ./face_embedding/
+    build: ./app/
     container_name: api_fr-container
     networks:
       - network_face
@@ -40,9 +41,9 @@ services:
       - "2024:2024"
     restart: always
     volumes:
-      - ./face_embedding:/face_embedding
-      - ./snapshots:/face_embedding/snapshots
-    command: ["uvicorn", "face:app", "--host", "0.0.0.0", "--port", "2024", "--workers", "3"]
+      - ./app:/app
+      - ./snapshots:/app/snapshots
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "2024", "--workers", "1"]
     depends_on:
       - qdrant
       - api_db
@@ -50,11 +51,12 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=1
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - FASTAPI_HOST=api_db
-      - FASTAPI_PORT=7005
-      - FACE_PORT=2024
+      - QDRANT_DB_HOST=api_db
+      - QDRANT_DB_PORT=7005
+      - HOST=0.0.0.0
+      - PORT=2024
+      - DEBUG=false
+      - DOCKER_ENV=true
 
   minio:
     image: minio/minio:latest
