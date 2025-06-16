@@ -62,7 +62,7 @@ RUN mkdir -p /root/.deepface/weights && \
     wget https://github.com/serengil/deepface_models/releases/download/v1.0/vgg_face_weights.h5 -O /root/.deepface/weights/vgg_face_weights.h5 && \
     wget --no-check-certificate 'https://drive.google.com/uc?export=download&id=1qcr9DbgsX3ryrz2uU8w4Xm3cOrRywXqb' -O /root/.deepface/weights/yolov8n-face.pt
 
-EXPOSE 8000
+# EXPOSE 8000
 
-# Set the command to run the application
-CMD ["python", "main.py"]
+# # Set the command to run the application
+# CMD ["python", "main.py"]
