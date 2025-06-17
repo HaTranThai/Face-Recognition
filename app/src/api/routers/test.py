@@ -13,7 +13,7 @@ settings = get_settings()
 face_service = FaceService(settings)
 
 
-@router.get("/test/basic")
+@router.get("/basic")
 async def test_basic_functionality():
     """Test basic functionality without heavy processing."""
     try:

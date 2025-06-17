@@ -183,3 +183,197 @@ class ImageProcessor:
             np.ndarray: Resized image
         """
         return cv2.resize(image, (0, 0), fx=scale_factor, fy=scale_factor)
+
+    async def get_bucket_info(self, bucket_name: str) -> dict:
+        """
+        Get information about a MinIO bucket.
+        
+        Args:
+            bucket_name: Name of the bucket
+            
+        Returns:
+            dict: Bucket information including object count and total size
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            s3_client = self._get_s3_client()
+            
+            # Get bucket info in thread pool
+            bucket_info = await loop.run_in_executor(
+                None, 
+                self._get_bucket_info_sync, 
+                s3_client, 
+                bucket_name
+            )
+            
+            return bucket_info
+            
+        except Exception as e:
+            logger.error(f"Error getting bucket info for {bucket_name}: {str(e)}")
+            return {"error": str(e)}
+    
+    def _get_bucket_info_sync(self, s3_client, bucket_name: str) -> dict:
+        """Synchronous helper to get bucket information."""
+        try:
+            # Check if bucket exists
+            s3_client.head_bucket(Bucket=bucket_name)
+            
+            # List objects and calculate stats
+            paginator = s3_client.get_paginator('list_objects_v2')
+            pages = paginator.paginate(Bucket=bucket_name)
+            
+            object_count = 0
+            total_size = 0
+            
+            for page in pages:
+                object_count += page.get('KeyCount', 0)
+                for obj in page.get('Contents', []):
+                    total_size += obj.get('Size', 0)
+            
+            return {
+                "bucket_name": bucket_name,
+                "object_count": object_count,
+                "total_size_bytes": total_size,
+                "total_size_mb": round(total_size / (1024 * 1024), 2),
+                "exists": True
+            }
+            
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                return {
+                    "bucket_name": bucket_name,
+                    "object_count": 0,
+                    "total_size_bytes": 0,
+                    "total_size_mb": 0,
+                    "exists": False
+                }
+            raise
+    
+    async def download_object(self, bucket_name: str, object_key: str) -> bytes:
+        """
+        Download an object from MinIO bucket.
+        
+        Args:
+            bucket_name: Name of the bucket
+            object_key: Key of the object to download
+            
+        Returns:
+            bytes: Object content
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            s3_client = self._get_s3_client()
+            
+            # Download object in thread pool
+            content = await loop.run_in_executor(
+                None, 
+                self._download_object_sync, 
+                s3_client, 
+                bucket_name, 
+                object_key
+            )
+            
+            return content
+            
+        except Exception as e:
+            logger.error(f"Error downloading object {bucket_name}/{object_key}: {str(e)}")
+            raise
+    
+    def _download_object_sync(self, s3_client, bucket_name: str, object_key: str) -> bytes:
+        """Synchronous helper to download object."""
+        response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
+        return response['Body'].read()
+    
+    async def upload_object(self, bucket_name: str, object_key: str, content: bytes) -> bool:
+        """
+        Upload an object to MinIO bucket.
+        
+        Args:
+            bucket_name: Name of the bucket
+            object_key: Key for the object
+            content: Object content as bytes
+            
+        Returns:
+            bool: Success status
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            s3_client = self._get_s3_client()
+            
+            # Upload object in thread pool
+            success = await loop.run_in_executor(
+                None, 
+                self._upload_object_sync, 
+                s3_client, 
+                bucket_name, 
+                object_key, 
+                content
+            )
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error uploading object {bucket_name}/{object_key}: {str(e)}")
+            return False
+    
+    def _upload_object_sync(self, s3_client, bucket_name: str, object_key: str, content: bytes) -> bool:
+        """Synchronous helper to upload object."""
+        try:
+            # Ensure bucket exists
+            try:
+                s3_client.head_bucket(Bucket=bucket_name)
+            except ClientError:
+                s3_client.create_bucket(Bucket=bucket_name)
+            
+            # Upload object
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key=object_key,
+                Body=content,
+                ContentType='application/octet-stream'
+            )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error in upload_object_sync: {str(e)}")
+            return False
+    
+    async def delete_object(self, bucket_name: str, object_key: str) -> bool:
+        """
+        Delete an object from MinIO bucket.
+        
+        Args:
+            bucket_name: Name of the bucket
+            object_key: Key of the object to delete
+            
+        Returns:
+            bool: Success status
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            s3_client = self._get_s3_client()
+            
+            # Delete object in thread pool
+            success = await loop.run_in_executor(
+                None, 
+                self._delete_object_sync, 
+                s3_client, 
+                bucket_name, 
+                object_key
+            )
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error deleting object {bucket_name}/{object_key}: {str(e)}")
+            return False
+    
+    def _delete_object_sync(self, s3_client, bucket_name: str, object_key: str) -> bool:
+        """Synchronous helper to delete object."""
+        try:
+            s3_client.delete_object(Bucket=bucket_name, Key=object_key)
+            return True
+        except Exception as e:
+            logger.error(f"Error in delete_object_sync: {str(e)}")
+            return False

@@ -14,13 +14,13 @@ settings = get_settings()
 face_service = FaceService(settings)
 
 
-@router.get("/health")
+@router.get("")
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "message": "Face Recognition API is running"}
 
 
-@router.get("/health/database")
+@router.get("/database")
 async def database_health_check():
     """Check connection to Qdrant database via API."""
     try:
@@ -51,7 +51,7 @@ async def database_health_check():
         }
 
 
-@router.get("/health/minio")
+@router.get("/minio")
 async def minio_health_check():
     """Check connection to MinIO storage."""
     try:
@@ -118,7 +118,7 @@ async def minio_health_check():
         }
 
 
-@router.get("/health/full")
+@router.get("/full")
 async def full_health_check():
     """Complete system health check including database and MinIO."""
     try:

@@ -160,10 +160,20 @@ GET /health/full           # Kiểm tra toàn bộ hệ thống
 ### Database Management APIs
 
 ```http
-GET    /get_list_collections           # Danh sách collections
-DELETE /delete_collection/{name}       # Xóa collection
-POST   /create_snapshot/{collection}   # Tạo snapshot
-POST   /recover_from_snapshot         # Khôi phục từ snapshot
+GET    /qdrant/get_list_collections           # Danh sách collections
+DELETE /qdrant/delete_collection/{name}       # Xóa collection
+POST   /qdrant/create_snapshot/{collection}   # Tạo snapshot
+POST   /qdrant/recover_from_snapshot         # Khôi phục từ snapshot
+```
+
+### MinIO Storage Management APIs
+
+```http
+GET    /minio/list_buckets                    # Liệt kê tất cả buckets
+GET    /minio/backup_bucket/{bucket_name}     # Backup một bucket cụ thể
+GET    /minio/backup_all                      # Backup tất cả buckets
+POST   /minio/restore_bucket                  # Restore từ backup file
+POST   /minio/sync_buckets                    # Đồng bộ giữa 2 buckets
 ```
 
 ### Batch Operations
@@ -316,6 +326,8 @@ services:
 - **📊 Multiple Collections**: Tổ chức faces theo store/role
 - **📦 Batch Operations**: Xử lý nhiều operations hiệu quả
 - **💾 Snapshot Management**: Backup và restore database
+- **🗄️ MinIO Backup/Restore**: Backup và restore toàn bộ MinIO storage
+- **🔄 Storage Sync**: Đồng bộ data giữa các MinIO buckets
 - **⚡ Real-time Processing**: Face detection và recognition nhanh
 - **📖 RESTful Design**: API endpoints clean và có documentation
 
@@ -463,8 +475,23 @@ collections = await database_client.get_collections()
 points = await database_client.search_face(collection, embedding, limit)
 ```
 
-### Testing & Debugging
+### MinIO Operations
 
+Các MinIO operations có thể thực hiện qua API hoặc trực tiếp:
+```python
+# Via API endpoints
+curl -X GET http://localhost:2024/minio/list_buckets
+curl -X GET http://localhost:2024/minio/backup_bucket/bucket_name -o backup.zip
+curl -X POST http://localhost:2024/minio/restore_bucket -F 'file=@backup.zip'
+
+# Via ImageProcessor class
+image_processor = ImageProcessor(config)
+bucket_info = await image_processor.get_bucket_info("bucket_name")
+content = await image_processor.download_object("bucket", "key")
+success = await image_processor.upload_object("bucket", "key", content)
+```
+
+### Testing & Debugging
 ```bash
 # Xem logs
 tail -f app/logs/face.log
@@ -565,6 +592,12 @@ curl -X POST http://localhost:2024/create_face_img_base64 \
 - **Database API**: http://localhost:7005/docs
 - **MinIO Console**: http://localhost:9001
 - **Qdrant Dashboard**: http://localhost:6333/dashboard
+
+### 🧪 Testing Scripts
+
+- **Integration Test**: `./test_integration.sh` - Test all services connectivity
+- **MinIO API Test**: `./test_minio_api.sh` - Test MinIO backup/restore APIs
+- **MinIO Demo**: `./demo_minio_backup.sh` - Interactive demo of MinIO features
 
 ## 🤝 Contributing
 

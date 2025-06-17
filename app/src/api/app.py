@@ -34,6 +34,10 @@ def create_app() -> FastAPI:
             {
                 "name": "Database",
                 "description": "APIs for Database"
+            },
+            {
+                "name": "MinIO",
+                "description": "APIs for MinIO Storage Operations - Backup, Restore, and Sync"
             }
         ]
     )

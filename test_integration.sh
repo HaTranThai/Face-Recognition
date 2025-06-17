@@ -61,11 +61,25 @@ else
     echo "❌ Failed"
 fi
 
+echo -n "  - GET /minio/list_buckets: "
+if curl -s http://localhost:2024/minio/list_buckets > /dev/null; then
+    echo "✅ OK"
+else
+    echo "❌ Failed"
+fi
+
 echo ""
 echo "📖 View API Documentation:"
 echo "========================="
 echo "• Database API:        http://localhost:7005/docs"
 echo "• Face Recognition:    http://localhost:2024/docs"
+echo "• MinIO APIs:          http://localhost:2024/docs#/MinIO"
+
+echo ""
+echo "🗄️ MinIO Management:"
+echo "===================="
+echo "• MinIO Console:       http://localhost:9001"
+echo "• Test MinIO APIs:     ./test_minio_api.sh"
 
 echo ""
 echo "✅ Integration test completed!"
