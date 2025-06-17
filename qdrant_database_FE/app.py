@@ -107,6 +107,7 @@ async def create_collection(data:CreateCollection):
             collection_name=collection_name,
             vectors_config=VectorParams(size=4096, distance=Distance.COSINE)
             )
+        await client.create_snapshot(collection_name=collection_name)
         return JSONResponse(status_code=201, content={"message": "Collection created"})
     else:
         return JSONResponse(status_code=200, content={"message": "Collection existed"})
@@ -156,7 +157,8 @@ async def recover_snapshot_local(collection_name):
 async def recover_snapshot(data: RecoverSnapshot):
     try:
         collection_name,path_snapshot = data.collection_name, data.snapshot_name
-        if collection_name not in ["Employees", "Customers"]:
+        # print(data)
+        if collection_name.split("_")[1] not in ["Employees", "Customers"]:
             return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
 
         if not await _check_exist(collection_name):
@@ -167,7 +169,6 @@ async def recover_snapshot(data: RecoverSnapshot):
         await client.recover_snapshot(
             collection_name=collection_name, location=f"file:///qdrant/snapshots/{path_snapshot}"
         )
-        print(data)
         return JSONResponse(status_code=200, content={"message": "Recover snapshot successfully"})
     except Exception as e:
         return JSONResponse(status_code=404, content={"message": str(e)})
@@ -315,6 +316,14 @@ async def delete_collection(data: CreateCollection):
         return JSONResponse(status_code=404, content={"message": "Collection name not found!"})
     try:
         await client.delete_collection(collection_name)
+        try:
+            snapshots = await client.list_snapshots(collection_name=f"{collection_name}")
+            for snapshot in snapshots:
+                await client.delete_snapshot(
+                    collection_name=collection_name, snapshot_name=snapshot.name
+                )
+        except Exception as e:
+            print(f"Error deleting snapshot: {str(e)}")
         return JSONResponse(status_code=200, content={"message": "Collection deleted"})
     except Exception as e:
         return JSONResponse(status_code=404, content={"message": str(e)})
