@@ -47,7 +47,6 @@ class FaceService:
     
     def __init__(self, config):
         self.config = config
-        self.face_analyzer = FaceAnalyzer()
         self.image_processor = ImageProcessor(config)
         self.database_client = DatabaseClient(config.QDRANT_DB_HOST, config.QDRANT_DB_PORT)
     
