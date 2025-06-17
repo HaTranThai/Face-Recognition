@@ -301,14 +301,26 @@ class DatabaseClient:
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 payload = {
-                    "collection_name": collection_name,
+                    "collection_name": f"{collection_name}",
                     "id": id
                 }
+                logger.info(f"Preparing to delete point {id} from {collection_name}")
                 
-                response = await client.delete(
-                    f"{self.base_url}/delete_point", 
+                
+                response = await client.request(
+                    method="DELETE",
+                    url=f"{self.base_url}/delete_point", 
                     json=payload
                 )
+                
+                # response = await client.post(
+                #     f"{self.base_url}/delete_point", 
+                #     json=payload
+                # )
+                
+                logger.info(f"Deleting point {id} from {collection_name}")
+                logger.debug(f"Delete response: {response.text}")
+                
                 response.raise_for_status()
                 
                 return response.status_code == 200
