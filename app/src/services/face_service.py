@@ -885,21 +885,21 @@ class FaceService:
         file_path_employee = f'./snapshots/{store_id}_Employees'
         
         # Check snapshot existence
-        check_start = time.time()
-        if not os.path.exists(file_path_customer) or not os.path.exists(file_path_employee):
-            total_time = time.time() - backup_start_time
-            logger.info(f"[TIMING] {store_id} - Total backup time (snapshot not found): {total_time:.3f}s")
-            return JSONResponse(status_code=404, content={
-                'status': 0,
-                'message': "Not found snapshot"
-            })
-        check_time = time.time() - check_start
-        logger.info(f"[TIMING] {store_id} - Snapshot existence check time: {check_time:.3f}s")
+        # check_start = time.time()
+        # if not os.path.exists(file_path_customer) or not os.path.exists(file_path_employee):
+        #     total_time = time.time() - backup_start_time
+        #     logger.info(f"[TIMING] {store_id} - Total backup time (snapshot not found): {total_time:.3f}s")
+        #     return JSONResponse(status_code=404, content={
+        #         'status': 0,
+        #         'message': "Not found snapshot"
+        #     })
+        # check_time = time.time() - check_start
+        # logger.info(f"[TIMING] {store_id} - Snapshot existence check time: {check_time:.3f}s")
         
         # Create snapshots
         try:
             snapshot_create_start = time.time()
-            for collection_name in ['Employees', 'Customers']:
+            for collection_name in [f'{store_id}_Employees', f'{store_id}_Customers']:
                 await self.database_client.create_snapshot(collection_name)
             snapshot_create_time = time.time() - snapshot_create_start
             logger.info(f"[TIMING] {store_id} - Snapshot creation time: {snapshot_create_time:.3f}s")
