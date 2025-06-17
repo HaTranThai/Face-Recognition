@@ -47,6 +47,7 @@ class FaceService:
     
     def __init__(self, config):
         self.config = config
+        self.face_analyzer = FaceAnalyzer()
         self.image_processor = ImageProcessor(config)
         self.database_client = DatabaseClient(config.QDRANT_DB_HOST, config.QDRANT_DB_PORT)
     
@@ -906,7 +907,7 @@ class FaceService:
         except Exception as e:
             pass
         
-        time_save = datetime.datetime.now().strftime("%Y_%m_%d")
+        time_save = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
         zipfile_name = f'snapshots_{store_id}_{time_save}.zip'
         
         try:
@@ -957,6 +958,7 @@ class FaceService:
         # Get collections list
         get_collections_start = time.time()
         clts = await self.database_client.get_collections()
+        logger.info(f"[TIMING] backup_all - Collections list retrieved: {clts}")
         get_collections_time = time.time() - get_collections_start
         logger.info(f"[TIMING] backup_all - Get collections list time: {get_collections_time:.3f}s")
         
@@ -972,19 +974,22 @@ class FaceService:
                 files_path_employee.append(clt)
         organize_time = time.time() - organize_start
         logger.info(f"[TIMING] backup_all - Collections organization time: {organize_time:.3f}s")
+        logger.info(f"[TIMING] backup_all - Customer collections: {files_path_customer}")
+        logger.info(f"[TIMING] backup_all - Employee collections: {files_path_employee}")
         
         # Check snapshot existence
-        check_snapshots_start = time.time()
-        for file_path_customer, file_path_employee in zip(files_path_customer, files_path_employee):
-            if not os.path.exists("./snapshots/"+file_path_customer) or not os.path.exists("./snapshots/"+file_path_employee):
-                total_time = time.time() - backup_all_start_time
-                logger.info(f"[TIMING] backup_all - Total backup time (snapshot not found): {total_time:.3f}s")
-                return JSONResponse(status_code=404, content={
-                    'status': 0,
-                    'message': "Not found snapshot"
-                })
-        check_snapshots_time = time.time() - check_snapshots_start
-        logger.info(f"[TIMING] backup_all - Snapshots existence check time: {check_snapshots_time:.3f}s")
+        # check_snapshots_start = time.time()
+        
+        # for file_path_customer, file_path_employee in zip(files_path_customer, files_path_employee):
+        #     if not os.path.exists("./snapshots/"+file_path_customer) or not os.path.exists("./snapshots/"+file_path_employee):
+        #         total_time = time.time() - backup_all_start_time
+        #         logger.info(f"[TIMING] backup_all - Total backup time (snapshot not found): {total_time:.3f}s")
+        #         return JSONResponse(status_code=404, content={
+        #             'status': 0,
+        #             'message': "Not found snapshot"
+        #         })
+        # check_snapshots_time = time.time() - check_snapshots_start
+        # logger.info(f"[TIMING] backup_all - Snapshots existence check time: {check_snapshots_time:.3f}s")
         
         # Create snapshots
         try:
@@ -997,7 +1002,7 @@ class FaceService:
         except Exception as e:
             pass
         
-        time_save = datetime.datetime.now().strftime("%Y_%m_%d")
+        time_save = datetime.datetime.now().strftime("%Y_%m_%d_")
         zipfile_name = f'snapshots_{time_save}.zip'
         
         try:
@@ -1078,12 +1083,14 @@ class FaceService:
                 for name in files:
                     extracted_files.append(os.path.join(root, name))
             
+            logger.info(f"[TIMING] recover_db - Extracted files: {extracted_files}")
             # Recover snapshots
             recover_snapshots_start = time.time()
             for folder in folders:
                 for snapshot_name in os.listdir(os.path.join(extract_dir, folder)):
                     if snapshot_name.endswith('.snapshot'):
                         snapshot_path = os.path.join(extract_name, folder, snapshot_name)
+                        logger.info(f"[TIMING] recover_db - Recovering snapshot: {snapshot_path}")
                         success = await self.database_client.recover_snapshot(
                             collection_name=folder,
                             snapshot_name=snapshot_path
@@ -1092,6 +1099,7 @@ class FaceService:
                         if not success:
                             total_time = time.time() - recover_start_time
                             logger.info(f"[TIMING] recover_db - Total recovery time (snapshot error): {total_time:.3f}s")
+                            shutil.rmtree(extract_dir)
                             return JSONResponse(status_code=500, content={
                                 'status': 2,
                                 'message': f"Error recovering snapshot {snapshot_name}"
