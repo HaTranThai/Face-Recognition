@@ -16,7 +16,17 @@ docker compose down
 
 # Build and start all services
 echo "🔨 Building and starting services..."
-docker compose up --build -d
+# docker compose up --build -d
+
+# Kiểm tra GPU bằng nvidia-smi
+if command -v nvidia-smi &> /dev/null && nvidia-smi -L &> /dev/null; then
+    echo "✅ GPU detected. Using docker-compose.yml (GPU version)."
+    docker compose -f docker-compose.yml up --build -d
+else
+    echo "⚠️ No GPU detected. Using docker-compose-cpu.yml (CPU version)."
+    docker compose -f docker-compose-cpu.yml up --build -d
+fi
+
 
 # Check status
 echo "📊 Checking service status..."
