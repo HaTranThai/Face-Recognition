@@ -7,18 +7,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from config.settings import get_settings
-from config.logging import setup_logging
+from config.logging import setup_logging, get_app_logger
 from .routes import router
 
 settings = get_settings()
-logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
     """Create and configure FastAPI application."""
     
-    # Setup logging
+    # Setup logging first
     setup_logging()
+    logger = get_app_logger()
+    logger.info("Starting Face Recognition API application")
     
     # Create FastAPI instance
     app = FastAPI(

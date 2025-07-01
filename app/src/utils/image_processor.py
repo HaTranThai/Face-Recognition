@@ -14,8 +14,9 @@ from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
+from config.logging import get_minio_logger
 
-logger = logging.getLogger(__name__)
+logger = get_minio_logger()
 
 
 class ImageProcessor:

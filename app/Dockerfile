@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu20.04
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu20.04
 
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8

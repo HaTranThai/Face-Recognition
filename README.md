@@ -525,10 +525,48 @@ curl -X POST http://localhost:2024/create_face_img_base64 \
 
 ## 📈 Monitoring & Logging
 
-- **📊 Structured Logging**: JSON-formatted logs với context
-- **⏱️ Performance Metrics**: Timing information cho tất cả operations
+### 📊 Categorized Logging System
+Hệ thống logging được chia thành 4 loại chính:
+
+- **� face.log** - Face recognition operations (detection, embedding, validation)
+- **🗄️ database.log** - Database operations (Qdrant vector operations, collections)
+- **💾 minio.log** - Storage operations (upload, download, backup, sync)
+- **⚙️ app.log** - General application logs (startup, health checks, API requests)
+
+### 🔧 Log Management Tools
+```bash
+# Xem danh sách tất cả log files
+./app/scripts/logs.sh list
+
+# Theo dõi logs realtime
+./app/scripts/logs.sh follow face
+./app/scripts/logs.sh follow database
+./app/scripts/logs.sh follow minio
+
+# Xem N dòng cuối
+./app/scripts/logs.sh tail face 100
+
+# Tìm kiếm trong logs
+./app/scripts/logs.sh search database error
+
+# Xem chỉ các lỗi
+./app/scripts/logs.sh errors face
+
+# Xem thống kê logs
+./app/scripts/logs.sh stats
+
+# Dọn dẹp logs cũ
+./app/scripts/logs.sh clean 7
+```
+
+### 📋 Log Features
+- **🔄 Rotating Files**: Mỗi log file tối đa 10MB, giữ 5 backup files
+- **⏱️ Performance Metrics**: Timing information cho tất cả operations  
 - **❤️ Health Endpoints**: Multi-level health checking
 - **🚨 Error Tracking**: Comprehensive error logging và tracking
+- **🎯 Category Separation**: Logs được phân loại theo module để dễ troubleshoot
+
+Xem chi tiết: [Categorized Logging Guide](CATEGORIZED_LOGGING_GUIDE.md)
 
 ## 🏛️ Architecture Benefits
 

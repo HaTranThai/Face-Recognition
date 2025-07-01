@@ -4,8 +4,9 @@ from fastapi import APIRouter, BackgroundTasks, File, UploadFile
 from fastapi.responses import JSONResponse
 from ...services.face_service import FaceService
 from config.settings import get_settings
+from config.logging import get_database_logger
 
-logger = logging.getLogger(__name__)
+logger = get_database_logger()
 router = APIRouter(tags=["Database"])
 
 # Initialize settings and service

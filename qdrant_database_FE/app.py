@@ -11,6 +11,10 @@ from uuid import uuid4
 import os
 # import random
 import datetime
+from logging_config import setup_database_logging, get_database_logger
+
+# Setup logging
+logger = setup_database_logging()
 
 tags_metadata = [
     {
@@ -30,11 +34,14 @@ tags_metadata = [
 # docs_url=None, redoc_url=None
 app = FastAPI(openapi_tags=tags_metadata)
 
+logger.info("Database API service starting...")
+
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int( os.getenv("QDRANT_PORT", "6333"))
 THRESHOLD_PASS = 0.54
 THRESHOLD_SEARCH = 0.54
 
+logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
 client = AsyncQdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
 class CreateCollection(BaseModel):

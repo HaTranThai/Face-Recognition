@@ -4,8 +4,9 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from ...services.face_service import FaceService
 from config.settings import get_settings
+from config.logging import get_app_logger
 
-logger = logging.getLogger(__name__)
+logger = get_app_logger()
 router = APIRouter(tags=["Testing"])
 
 # Initialize settings and service

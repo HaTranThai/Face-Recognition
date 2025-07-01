@@ -6,8 +6,9 @@ from fastapi.responses import JSONResponse
 from ...core.models import CreateFace, FaceRecog, DeleteFace
 from ...services.face_service import FaceService
 from config.settings import get_settings
+from config.logging import get_face_logger
 
-logger = logging.getLogger(__name__)
+logger = get_face_logger()
 router = APIRouter(tags=["Face"])
 
 # Initialize settings and service

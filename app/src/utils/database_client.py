@@ -3,8 +3,9 @@ import logging
 from typing import List, Optional, Dict, Any
 import httpx
 import asyncio
+from config.logging import get_database_logger
 
-logger = logging.getLogger(__name__)
+logger = get_database_logger()
 
 
 class DatabaseClient:

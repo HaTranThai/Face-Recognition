@@ -34,8 +34,9 @@ from ..utils.legacy import (
     check_condition
 )
 from ..core.models import CreateFace, FaceRecog, DeleteFace
+from config.logging import get_face_logger
 
-logger = logging.getLogger(__name__)
+logger = get_face_logger()
 
 # Giới hạn kết nối đồng thời 
 HTTP_SEMAPHORE = asyncio.Semaphore(5)

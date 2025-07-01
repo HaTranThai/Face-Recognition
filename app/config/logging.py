@@ -2,6 +2,7 @@
 Logging configuration for the application.
 """
 import logging
+import logging.handlers
 import os
 from datetime import datetime
 from config.settings import get_settings
@@ -10,36 +11,130 @@ settings = get_settings()
 
 
 def setup_logging():
-    """Setup logging configuration."""
+    """Setup categorized logging configuration for face, database, and minio operations."""
     # Ensure logs directory exists
     os.makedirs(settings.LOGS_PATH, exist_ok=True)
     
-    # Configure logging
-    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    # Common log format
+    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s"
     date_format = "%Y-%m-%d %H:%M:%S"
     
-    logging.basicConfig(
-        level=logging.INFO if not settings.DEBUG else logging.DEBUG,
-        format=log_format,
-        datefmt=date_format,
-        handlers=[
-            logging.FileHandler(
-                os.path.join(settings.LOGS_PATH, "face.log"), 
-                mode="a",
-                encoding="utf-8"
-            ),
-            # Uncomment for console output
-            # logging.StreamHandler()
-        ]
+    # Clear any existing handlers to avoid duplicates
+    logging.getLogger().handlers.clear()
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO if not settings.DEBUG else logging.DEBUG)
+    
+    # Create formatters
+    formatter = logging.Formatter(log_format, date_format)
+    
+    # ==== FACE RECOGNITION LOGGER ====
+    face_logger = logging.getLogger("face")
+    face_logger.setLevel(logging.INFO if not settings.DEBUG else logging.DEBUG)
+    face_logger.propagate = False
+    
+    face_handler = logging.handlers.RotatingFileHandler(
+        os.path.join(settings.LOGS_PATH, "face.log"),
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5,
+        encoding="utf-8"
     )
+    face_handler.setFormatter(formatter)
+    face_logger.addHandler(face_handler)
     
-    # Get logger for the application
-    logger = logging.getLogger("face_recognition")
-    logger.info("Logging setup completed")
+    # ==== DATABASE LOGGER ====
+    database_logger = logging.getLogger("database")
+    database_logger.setLevel(logging.INFO if not settings.DEBUG else logging.DEBUG)
+    database_logger.propagate = False
     
-    return logger
+    database_handler = logging.handlers.RotatingFileHandler(
+        os.path.join(settings.LOGS_PATH, "database.log"),
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5,
+        encoding="utf-8"
+    )
+    database_handler.setFormatter(formatter)
+    database_logger.addHandler(database_handler)
+    
+    # ==== MINIO LOGGER ====
+    minio_logger = logging.getLogger("minio")
+    minio_logger.setLevel(logging.INFO if not settings.DEBUG else logging.DEBUG)
+    minio_logger.propagate = False
+    
+    minio_handler = logging.handlers.RotatingFileHandler(
+        os.path.join(settings.LOGS_PATH, "minio.log"),
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5,
+        encoding="utf-8"
+    )
+    minio_handler.setFormatter(formatter)
+    minio_logger.addHandler(minio_handler)
+    
+    # ==== GENERAL APPLICATION LOGGER ====
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(logging.INFO if not settings.DEBUG else logging.DEBUG)
+    app_logger.propagate = False
+    
+    app_handler = logging.handlers.RotatingFileHandler(
+        os.path.join(settings.LOGS_PATH, "app.log"),
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5,
+        encoding="utf-8"
+    )
+    app_handler.setFormatter(formatter)
+    app_logger.addHandler(app_handler)
+    
+    # Add console handler for development (optional)
+    if settings.DEBUG:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        face_logger.addHandler(console_handler)
+        database_logger.addHandler(console_handler)
+        minio_logger.addHandler(console_handler)
+        app_logger.addHandler(console_handler)
+    
+    # Log successful setup
+    app_logger.info("Categorized logging setup completed")
+    face_logger.info("Face recognition logging initialized")
+    database_logger.info("Database logging initialized")
+    minio_logger.info("MinIO logging initialized")
+    
+    return app_logger
 
 
-def get_logger(name: str = "face_recognition") -> logging.Logger:
-    """Get logger instance."""
-    return logging.getLogger(name)
+def get_logger(category: str = "app") -> logging.Logger:
+    """
+    Get logger instance for specific category.
+    
+    Args:
+        category: Logger category ('face', 'database', 'minio', 'app')
+    
+    Returns:
+        Logger instance for the specified category
+    """
+    valid_categories = ["face", "database", "minio", "app"]
+    if category not in valid_categories:
+        category = "app"
+    
+    return logging.getLogger(category)
+
+
+def get_face_logger() -> logging.Logger:
+    """Get face recognition specific logger."""
+    return logging.getLogger("face")
+
+
+def get_database_logger() -> logging.Logger:
+    """Get database operations specific logger."""
+    return logging.getLogger("database")
+
+
+def get_minio_logger() -> logging.Logger:
+    """Get MinIO operations specific logger."""
+    return logging.getLogger("minio")
+
+
+def get_app_logger() -> logging.Logger:
+    """Get general application logger."""
+    return logging.getLogger("app")

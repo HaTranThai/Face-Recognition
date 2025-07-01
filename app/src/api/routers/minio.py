@@ -14,8 +14,9 @@ from botocore.exceptions import ClientError
 
 from ...services.face_service import FaceService
 from config.settings import get_settings
+from config.logging import get_minio_logger
 
-logger = logging.getLogger(__name__)
+logger = get_minio_logger()
 router = APIRouter(tags=["MinIO"])
 
 # Initialize settings and service
@@ -113,9 +114,7 @@ async def backup_minio_bucket(bucket_name: str, background_tasks: BackgroundTask
         
         # Schedule cleanup after sending file
         background_tasks.add_task(_cleanup_file, zip_path)
-        
-        # remove snapshots backup_dir
-        
+                
         return FileResponse(
             path=zip_path,
             filename=zip_filename,
@@ -467,7 +466,7 @@ async def _sync_buckets(s3_client, source_bucket: str, target_bucket: str, delet
 
 async def _cleanup_file(file_path: str):
     """Remove temporary file after delay."""
-    await asyncio.sleep(10)  # Wait 10 seconds before cleanup
+    await asyncio.sleep(30)  # Wait 10 seconds before cleanup
     try:
         if os.path.exists(file_path):
             os.remove(file_path)
