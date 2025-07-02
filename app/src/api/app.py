@@ -107,7 +107,3 @@ def create_app() -> FastAPI:
         return {"status": "healthy"}
     
     return app
-
-
-# Create app instance for direct import
-app = create_app()

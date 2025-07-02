@@ -24,7 +24,7 @@ services:
     restart: always
     volumes:
       - ./qdrant_database_FE:/qdrant_database_FE
-    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7005", "--workers", "1"]
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7005", "--workers", "2"]
     depends_on:
       - qdrant
     environment:
@@ -43,7 +43,7 @@ services:
     volumes:
       - ./app:/app
       - ./app/snapshots:/app/snapshots
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "2024", "--workers", "1"]
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "2024", "--workers", "4"]
     depends_on:
       - qdrant
       - api_db

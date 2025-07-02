@@ -9,9 +9,18 @@ from config.settings import get_settings
 
 settings = get_settings()
 
+# Global flag to prevent multiple logging setup
+_logging_setup_done = False
+
 
 def setup_logging():
     """Setup categorized logging configuration for face, database, and minio operations."""
+    global _logging_setup_done
+    
+    # If logging is already setup, return early to prevent duplicates
+    if _logging_setup_done:
+        return logging.getLogger("app")
+    
     # Ensure logs directory exists
     os.makedirs(settings.LOGS_PATH, exist_ok=True)
     
@@ -21,6 +30,11 @@ def setup_logging():
     
     # Clear any existing handlers to avoid duplicates
     logging.getLogger().handlers.clear()
+    
+    # Clear handlers for all category loggers to prevent duplicates
+    for category in ["face", "database", "minio", "app"]:
+        category_logger = logging.getLogger(category)
+        category_logger.handlers.clear()
     
     # Configure root logger
     root_logger = logging.getLogger()
@@ -100,6 +114,9 @@ def setup_logging():
     database_logger.info("Database logging initialized")
     minio_logger.info("MinIO logging initialized")
     
+    # Mark logging as setup to prevent future duplicate setups
+    _logging_setup_done = True
+    
     return app_logger
 
 
@@ -138,3 +155,9 @@ def get_minio_logger() -> logging.Logger:
 def get_app_logger() -> logging.Logger:
     """Get general application logger."""
     return logging.getLogger("app")
+
+
+def reset_logging_setup():
+    """Reset the logging setup flag. Useful for testing or reinitialization."""
+    global _logging_setup_done
+    _logging_setup_done = False
