@@ -168,7 +168,7 @@ async def backup_all_minio(background_tasks: BackgroundTasks):
         background_tasks.add_task(_cleanup_file, zip_path)
         
         # remove snapshots backup_dir
-        os.rmdir(backup_dir)
+        # os.rmdir(backup_dir)
         
         return FileResponse(
             path=zip_path,
