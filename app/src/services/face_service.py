@@ -481,15 +481,20 @@ class FaceService:
                 'name': "Unknown"
             })
     
-    async def create_face(self, data: CreateFace) -> JSONResponse:
+    async def create_face(self, data: CreateFace, update_face=False) -> JSONResponse:
         """Create a new face entry in the database."""
+        if update_face:
+            logger_text = "update"
+        else:
+            logger_text = "create"
+    
         create_face_start_time = time.time()
         id_value = data.id
         name_value = data.name 
         store_id = data.store_id
         
-        logger.info(f"[TIMING] {store_id} - Starting create face request for {name_value} with id {id_value}")
-        logger.info(f"create_face - Create face {name_value} with id {id_value} from store {store_id}")
+        logger.info(f"[TIMING] {store_id} - Starting {logger_text} face request for {name_value} with id {id_value}")
+        logger.info(f"{logger_text}_face - {logger_text} face {name_value} with id {id_value} from store {store_id}")
         
         # Check input conditions
         condition_check_start = time.time()
@@ -528,7 +533,7 @@ class FaceService:
         logger.info(f"[TIMING] {store_id} - Parallel collection check + face detection time: {parallel_processing_time:.3f}s")
         
         if not collection_exists:
-            logger.warning(f"create_face - {store_id} - Error when create collection")
+            logger.warning(f"{logger_text}_face - {store_id} - Error when {logger_text} collection")
             gc.collect()
             return JSONResponse(status_code=500, content={
                 'status': 2,
@@ -536,7 +541,7 @@ class FaceService:
             })
         
         if not check_emb:
-            logger.warning(f"create_face - {store_id} - {message}")
+            logger.warning(f"{logger_text}_face - {store_id} - {message}")
             gc.collect()
             return message
         
@@ -550,31 +555,32 @@ class FaceService:
             logger.info(f"[TIMING] {store_id} - Save face image (no embedding) time: {save_time:.3f}s")
             
             total_time = time.time() - create_face_start_time
-            logger.info(f"[TIMING] {store_id} - Total create face time (no embedding): {total_time:.3f}s")
-            logger.info(f"create_face - {store_id} - Create face {name_value} with id {id_value} successfully without embedding")
+            logger.info(f"[TIMING] {store_id} - Total {logger_text} face time (no embedding): {total_time:.3f}s")
+            logger.info(f"{logger_text}_face - {store_id} - {logger_text} face {name_value} with id {id_value} successfully without embedding")
             
             del img_decode
             gc.collect()
             
             return JSONResponse(status_code=200, content={
                 'status': 1,
-                'message': f'Create face {name_value} with id {id_value} successfully'
+                'message': f'{logger_text} face {name_value} with id {id_value} successfully'
             })
         
         # Check if face already exists
-        search_existing_start = time.time()
-        search_result = await self.search_face(collection_name, emb, store_id)
-        search_existing_time = time.time() - search_existing_start
-        logger.info(f"[TIMING] {store_id} - Search existing face time: {search_existing_time:.3f}s")
-        
-        if search_result.get('data') and len(search_result['data']) > 0:
-            total_time = time.time() - create_face_start_time
-            logger.info(f"[TIMING] {store_id} - Total create face time (face exists): {total_time:.3f}s")
-            logger.warning(f"create_face - {store_id} - Face is existed! Please use another face")
-            return JSONResponse(status_code=409, content={
-                'status': 0,
-                'message': "Face is existed! Please use another face"
-            })
+        if not update_face:
+            search_existing_start = time.time()
+            search_result = await self.search_face(collection_name, emb, store_id)
+            search_existing_time = time.time() - search_existing_start
+            logger.info(f"[TIMING] {store_id} - Search existing face time: {search_existing_time:.3f}s")
+            
+            if search_result.get('data') and len(search_result['data']) > 0:
+                total_time = time.time() - create_face_start_time
+                logger.info(f"[TIMING] {store_id} - Total {logger_text} face time (face exists): {total_time:.3f}s")
+                logger.warning(f"{logger_text}_face - {store_id} - Face is existed! Please use another face")
+                return JSONResponse(status_code=409, content={
+                    'status': 0,
+                    'message': "Face is existed! Please use another face"
+                })
         
         # Insert new face
         insert_face_start = time.time()
@@ -589,7 +595,7 @@ class FaceService:
         )
         
         if not success:
-            logger.warning(f"create_face - {store_id} - Error when insert face")
+            logger.warning(f"{logger_text}_face - {store_id} - Error when insert face")
             return JSONResponse(status_code=500, content={
                 'status': 2,
                 'message': "Error when insert face"
@@ -605,16 +611,18 @@ class FaceService:
         logger.info(f"[TIMING] {store_id} - Save face image time: {save_image_time:.3f}s")
         
         total_time = time.time() - create_face_start_time
-        logger.info(f"[TIMING] {store_id} - Total successful create face time: {total_time:.3f}s")
-        logger.info(f"create_face - {store_id} - Create face {name_value} with id {id_value} successfully")
+        logger.info(f"[TIMING] {store_id} - Total successful {logger_text} face time: {total_time:.3f}s")
+        logger.info(f"{logger_text}_face - {store_id} - {logger_text} face {name_value} with id {id_value} successfully")
         
         return JSONResponse(status_code=201, content={
             'status': 1,
-            'message': f'Create face {name_value} with id {id_value} successfully'
+            'message': f'{logger_text} face {name_value} with id {id_value} successfully'
         })
     
     async def add_employee_face(self, data: CreateFace, background_tasks) -> JSONResponse:
-        
+        background_tasks.add_task(
+            self.create_face, data, update_face=True
+        )
         return JSONResponse(status_code=201, content={
             'status': 1,
             'message': "Successfully"

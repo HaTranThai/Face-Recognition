@@ -4,6 +4,10 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     container_name: qdrant-container
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     networks:
       - network_face
     ports:
