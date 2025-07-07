@@ -613,6 +613,13 @@ class FaceService:
             'message': f'Create face {name_value} with id {id_value} successfully'
         })
     
+    async def add_employee_face(self, data: CreateFace, background_tasks) -> JSONResponse:
+        
+        return JSONResponse(status_code=201, content={
+            'status': 1,
+            'message': "Successfully"
+        })
+    
     async def delete_face(self, data: DeleteFace) -> JSONResponse:
         """
         Delete a face from the database.

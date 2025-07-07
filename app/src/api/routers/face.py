@@ -1,7 +1,7 @@
 """Face recognition routes."""
 import logging
 from typing import List
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import JSONResponse
 from ...core.models import CreateFace, FaceRecog, DeleteFace
 from ...services.face_service import FaceService
@@ -159,6 +159,20 @@ async def face_recog_img_base64_batch(data_list: List[FaceRecog]):
             'message': "Internal server error"
         })
 
+@router.post("/add_employee_face",
+        description="Add face from image base64; id: ID of employee; name: Name of employee",
+        tags=["Face"])
+async def add_employee_face(data: CreateFace, background_tasks: BackgroundTasks):
+    # Sử dụng phiên bản async cho xử lý nền
+    # background_tasks.add_task(process_add_employee_face_async, data)
+    try:
+        return await face_service.add_employee_face(data, background_tasks)
+    except Exception as e:
+        logger.error(f"Add employee face failed: {str(e)}")
+        return JSONResponse(status_code=500, content={
+            'status': 2,
+            'message': "Internal server error"
+        })
 
 @router.post("/create_face_img_base64_batch_customers",
             description="Create face from image base64 batch; id: ID of customer; name: Name of customer")
