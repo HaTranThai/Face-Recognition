@@ -53,7 +53,7 @@ services:
       - api_db
     runtime: nvidia
     environment:
-      - NVIDIA_VISIBLE_DEVICES=1
+      - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - QDRANT_DB_HOST=api_db
       - QDRANT_DB_PORT=7005

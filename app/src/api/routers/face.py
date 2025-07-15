@@ -160,7 +160,7 @@ async def face_recog_img_base64_batch(data_list: List[FaceRecog]):
         })
 
 @router.post("/add_employee_face",
-        description="Add face from image base64; id: ID of employee; name: Name of employee",
+        description="Add employee when they click 'Clock In' or 'Clock Out'; id: ID of employee; name: Name of employee",
         tags=["Face"])
 async def add_employee_face(data: CreateFace, background_tasks: BackgroundTasks):
     # Sử dụng phiên bản async cho xử lý nền
