@@ -25,7 +25,7 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip
 
 RUN pip3 install opencv-contrib-python==4.10.0.84
 RUN pip3 install opencv-python==4.10.0.84
-RUN pip3 install 'tensorflow[and-cuda]==2.14.0'
+RUN pip3 install 'tensorflow[and-cuda]'
 RUN pip3 install --no-cache-dir "pandas==2.2.2"
 RUN pip3 install deepface==0.0.93
 RUN pip3 install ultralytics==8.2.97
