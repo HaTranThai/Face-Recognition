@@ -168,12 +168,12 @@ async def recover_snapshot(data: RecoverSnapshot):
         if collection_name.split("_")[1] not in ["Employees", "Customers"]:
             return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
 
-        if not await _check_exist(collection_name):
-            await client.create_collection(
+        if not _check_exist(collection_name):
+            client.create_collection(
                 collection_name=collection_name,
                 vectors_config=VectorParams(size=4096, distance=Distance.COSINE)
                 )
-        await client.recover_snapshot(
+        client.recover_snapshot(
             collection_name=collection_name, location=f"file:///qdrant/snapshots/{path_snapshot}"
         )
         return JSONResponse(status_code=200, content={"message": "Recover snapshot successfully"})
