@@ -2,7 +2,7 @@
 
 services:
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.14.1-gpu-nvidia
     container_name: qdrant-container
     ulimits:
       nofile:
@@ -12,11 +12,14 @@ services:
       - network_face
     ports:
       - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     restart: always
     volumes:
       - qdrant_data:/qdrant/storage
       - ./qdrant_storage:/qdrant/storage  # Mount actual data directory
       - ./app/snapshots:/qdrant/snapshots
+    environment:
+      - QDRANT__GPU__INDEXING=1
 
   api_db:
     build: ./qdrant_database_FE/
@@ -47,7 +50,7 @@ services:
     volumes:
       - ./app:/app
       - ./app/snapshots:/app/snapshots
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "2024", "--workers", "4"]
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "2024", "--workers", "1"]
     depends_on:
       - qdrant
       - api_db

@@ -39,8 +39,8 @@ from config.logging import get_face_logger
 logger = get_face_logger()
 
 # Giới hạn kết nối đồng thời 
-HTTP_SEMAPHORE = asyncio.Semaphore(5)
-PROCESSING_SEMAPHORE = asyncio.Semaphore(5)
+HTTP_SEMAPHORE = asyncio.Semaphore(10)
+PROCESSING_SEMAPHORE = asyncio.Semaphore(10)
 
 
 class FaceService:
@@ -483,7 +483,8 @@ class FaceService:
     
     async def create_face(self, data: CreateFace, update_face=False) -> JSONResponse:
         """Create a new face entry in the database."""
-        if update_face:
+        if update_face or data.is_update:
+            data.is_update = True
             logger_text = "update"
         else:
             logger_text = "create"
@@ -567,7 +568,7 @@ class FaceService:
             })
         
         # Check if face already exists
-        if not update_face:
+        if not data.is_update:
             search_existing_start = time.time()
             search_result = await self.search_face(collection_name, emb, store_id)
             search_existing_time = time.time() - search_existing_start

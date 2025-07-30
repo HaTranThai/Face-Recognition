@@ -42,7 +42,7 @@ THRESHOLD_PASS = 0.54
 THRESHOLD_SEARCH = 0.54
 
 logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
-client = AsyncQdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+client = AsyncQdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=300)
 
 class CreateCollection(BaseModel):
     collection_name: str = None
@@ -112,8 +112,15 @@ async def create_collection(data:CreateCollection):
     if not await _check_exist(collection_name):
         await client.create_collection(
             collection_name=collection_name,
-            vectors_config=VectorParams(size=4096, distance=Distance.COSINE)
+            vectors_config=VectorParams(size=4096, distance=Distance.COSINE, on_disk=True),
+            hnsw_config=models.HnswConfigDiff(
+                m=16,
+                ef_construct=200,
+            ),
+            quantization_config=models.BinaryQuantization(
+                binary=models.BinaryQuantizationConfig(always_ram=True)
             )
+        )
         await client.create_snapshot(collection_name=collection_name)
         return JSONResponse(status_code=201, content={"message": "Collection created"})
     else:
@@ -168,12 +175,19 @@ async def recover_snapshot(data: RecoverSnapshot):
         if collection_name.split("_")[1] not in ["Employees", "Customers"]:
             return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
 
-        if not _check_exist(collection_name):
-            client.create_collection(
+        if not await _check_exist(collection_name):
+            await client.create_collection(
                 collection_name=collection_name,
-                vectors_config=VectorParams(size=4096, distance=Distance.COSINE)
+                vectors_config=VectorParams(size=4096, distance=Distance.COSINE, on_disk=True),
+                hnsw_config=models.HnswConfigDiff(
+                    m=16,
+                    ef_construct=200, 
+                ),
+                quantization_config=models.BinaryQuantization(
+                    binary=models.BinaryQuantizationConfig(always_ram=True)
                 )
-        client.recover_snapshot(
+            )
+        await client.recover_snapshot(
             collection_name=collection_name, location=f"file:///qdrant/snapshots/{path_snapshot}"
         )
         return JSONResponse(status_code=200, content={"message": "Recover snapshot successfully"})
@@ -256,14 +270,28 @@ async def search_point(data: SearchPoint):
         return JSONResponse(status_code=404, content={"message": "Embedding not found or invalid!"})
     
     try:
-        result = await client.search(collection_name=collection_name, query_vector=vector_embedding, limit=5, query_filter = models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="store_id",
-                    match=models.MatchValue(value=store_id)
+        result = await client.search(
+            collection_name=collection_name, 
+            query_vector=vector_embedding, 
+            limit=5, 
+            query_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="store_id",
+                        match=models.MatchValue(value=store_id)
+                    )
+                ]
+            ),
+            search_params=models.SearchParams(
+                hnsw_ef=128,
+                exact=True,
+                quantization=models.QuantizationSearchParams(
+                    rescore=True,       
+                    oversampling=2.0  
                 )
-            ]
-        ))
+            ),
+            timeout=30
+        )
         print([(i.score, i.payload) for i in result])
 
         data = [(i.score, i.payload) for i in result if i.score >= THRESHOLD_PASS]

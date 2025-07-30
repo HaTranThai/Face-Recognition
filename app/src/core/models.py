@@ -18,12 +18,14 @@ class CreateFace(BaseModel):
     - name: Name of customer or employee  
     - role: 1 for Employee, 0 for Customer
     - store_id: Store identifier
+    - is_update: Flag to indicate if the face should be updated if it already exists
     """
     img_base64: str = Query(None, description="Ảnh chứa mặt để đăng ký")
     id: str = Query(None, description="ID của khách hàng/ nhân viên")
     name: str = Query(None, description="Tên của khách hàng/ nhân viên")
     role: str = Query(None, description="1: Nhân viên, 0: Khách hàng")
     store_id: str = Query(None, description="ID cửa hàng")
+    is_update: bool = Query(False, description="Cập nhật thông tin nếu đã tồn tại")
 
 
 class DeleteFace(BaseModel):
