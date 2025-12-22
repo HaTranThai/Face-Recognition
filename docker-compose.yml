@@ -1,0 +1,89 @@
+# version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.14.1-gpu-nvidia
+    container_name: qdrant-container
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    networks:
+      - network_face
+    ports:
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+    restart: always
+    volumes:
+      - qdrant_data:/qdrant/storage
+      - ./qdrant_storage:/qdrant/storage  # Mount actual data directory
+      - ./app/snapshots:/qdrant/snapshots
+    environment:
+      - QDRANT__GPU__INDEXING=1
+
+  api_db:
+    build: ./qdrant_database_FE/
+    container_name: api_db-container
+    networks:
+      - network_face
+    ports:
+      - "127.0.0.1:7005:7005"
+    restart: always
+    volumes:
+      - ./qdrant_database_FE:/qdrant_database_FE
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7005", "--workers", "2"]
+    depends_on:
+      - qdrant
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - FASTAPI_PORT=7005
+  
+  api_fr:
+    build: ./app/
+    container_name: api_fr-container
+    networks:
+      - network_face
+    ports:
+      - "2024:2024"
+    restart: always
+    volumes:
+      - ./app:/app
+      - ./app/snapshots:/app/snapshots
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "2024", "--workers", "6"]
+    depends_on:
+      - qdrant
+      - api_db
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - QDRANT_DB_HOST=api_db
+      - QDRANT_DB_PORT=7005
+      - HOST=0.0.0.0
+      - PORT=2024
+      - DEBUG=false
+      - DOCKER_ENV=true
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio_container
+    restart: always
+    ports:
+      - "9000:9000" 
+      - "9001:9001" 
+    environment:
+      MINIO_ROOT_USER: minioadmin 
+      MINIO_ROOT_PASSWORD: minioadmin1245 
+    command: server /data --console-address ":9001"
+    volumes:
+      - ./app/miniodata:/data
+    networks:
+      - network_face
+
+volumes:
+  qdrant_data:
+
+networks:
+  network_face:
+    driver: bridge

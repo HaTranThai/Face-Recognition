@@ -1,0 +1,66 @@
+FROM python:3.9-slim
+
+ENV LC_ALL=C.UTF-8
+ENV LANG=C.UTF-8
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        wget \
+        ffmpeg \
+        libgl1 \
+        libglib2.0-0 \
+        libsm6 \
+        libxext6 \
+        libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --upgrade pip
+
+# ----------------------------
+# FIX dependency conflict !!!
+# ----------------------------
+RUN pip install typing-extensions==4.9.0
+
+# Pydantic v2 + Settings
+RUN pip install pydantic==2.7.1 pydantic-settings==2.2.1
+
+# ----------------------------
+# Install main dependencies
+# ----------------------------
+RUN pip install --no-cache-dir \
+    opencv-contrib-python==4.10.0.84 \
+    opencv-python==4.10.0.84 \
+    tensorflow==2.13.0 \
+    pandas==2.2.2 \
+    deepface==0.0.93 \
+    ultralytics==8.2.97 \
+    mediapipe==0.10.15 \
+    scipy \
+    Pillow==10.1.0 \
+    fastapi \
+    uvicorn \
+    python-multipart \
+    python-dotenv \
+    requests \
+    boto3 \
+    aioboto3 \
+    aiobotocore \
+    httpx
+
+WORKDIR /app
+
+COPY main.py /app/
+COPY src/ /app/src/
+COPY config/ /app/config/
+COPY models/ /app/models/
+COPY .env /app/
+
+RUN mkdir -p /app/logs /app/static /app/snapshots
+
+RUN mkdir -p /root/.deepface/weights && \
+    wget https://github.com/serengil/deepface_models/releases/download/v1.0/vgg_face_weights.h5 \
+        -O /root/.deepface/weights/vgg_face_weights.h5 && \
+    wget --no-check-certificate \
+        "https://drive.google.com/uc?export=download&id=1qcr9DbgsX3ryrz2uU8w4Xm3cOrRywXqb" \
+        -O /root/.deepface/weights/yolov8n-face.pt
