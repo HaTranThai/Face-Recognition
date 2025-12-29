@@ -23,7 +23,8 @@ RUN python3 -m pip install --upgrade pip
 RUN pip install typing-extensions==4.9.0
 
 # Pydantic v2 + Settings
-RUN pip install pydantic==2.7.1 pydantic-settings==2.2.1
+RUN pip uninstall -y pydantic pydantic-settings && \
+    pip install -U "pydantic>=2.5,<3" "pydantic-settings>=2,<3" "typing_extensions==4.9.0"
 
 # ----------------------------
 # Install main dependencies

@@ -20,8 +20,8 @@
 # aioboto3
 tf-keras
 aiobotocore
-pydantic==2.5.0
-pydantic-settings
+pydantic>=2.5,<3
+pydantic-settings>=2,<3
 
 # Utilities
 Pillow==10.1.0

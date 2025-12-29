@@ -51,12 +51,7 @@ class FaceService:
         self.image_processor = ImageProcessor(config)
         self.database_client = DatabaseClient(config.QDRANT_DB_HOST, config.QDRANT_DB_PORT)
     
-    async def detect_and_embed_face(
-        self,
-        data, 
-        is_detect_face: bool = True, 
-        is_checkin: bool = True
-    ) -> Tuple[bool, Any]:
+    async def detect_and_embed_face(self, data, is_detect_face: bool = True, is_checkin: bool = True) -> Tuple[bool, Any]:
         """
         Detect face in image and generate embedding with comprehensive validation.
         Async version with parallel processing for better performance.

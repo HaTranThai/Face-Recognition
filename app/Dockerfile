@@ -31,9 +31,8 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip
 # 2) Fix compatibility (TensorFlow 2.13)
 # -------------------------------------------------------------------
 RUN pip install \
-    pydantic==2.5.2 \
-    pydantic-settings==2.1.0 \
-    typing-extensions==4.9.0
+    pip uninstall -y pydantic pydantic-settings && \
+    pip install -U "pydantic>=2.5,<3" "pydantic-settings>=2,<3" "typing-extensions==4.9.0"
 
 # -------------------------------------------------------------------
 # 3) Install Python dependencies
