@@ -70,6 +70,29 @@ def create_app() -> FastAPI:
             # Create logs directory if not exists
             os.makedirs("./logs", exist_ok=True)
             
+            logger.info("Performing startup connection checks...")
+            
+            # Init service tạm để check
+            from src.services.face_service import FaceService
+            svc = FaceService(settings)
+            
+            # Check Qdrant
+            try:
+                col = await svc.database_client.get_collections()
+                if isinstance(col, list):
+                    logger.info("✅ Startup Check: Qdrant CONNECTED")
+                else:
+                    logger.error("❌ Startup Check: Qdrant FAILED")
+            except Exception as e:
+                logger.error(f"❌ Startup Check: Qdrant ERROR - {e}")
+
+            # Check MinIO
+            try:
+                svc.image_processor._get_s3_client().list_buckets()
+                logger.info("✅ Startup Check: MinIO CONNECTED")
+            except Exception as e:
+                logger.error(f"❌ Startup Check: MinIO ERROR - {e}")
+
             # Test face recognition initialization
             try:
                 test_image_path = 'testface.jpg'
