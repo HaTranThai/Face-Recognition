@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     CORS_CREDENTIALS: bool = True
     CORS_METHODS: List[str] = ["*"]
     CORS_HEADERS: List[str] = ["*"]
+
+    API_KEY: str = "mac_dinh"
     
     @property
     def left_eye_landmarks_list(self) -> List[int]:

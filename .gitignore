@@ -5,3 +5,4 @@ __pycache__
 app/miniodata
 qdrant_database_FE/.env
 Backup_logs
+venv

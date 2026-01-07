@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 from typing import Union, List
 from qdrant_client import AsyncQdrantClient, models
+from qdrant_client.http import models
 from qdrant_client.http.models import Distance, VectorParams, PointStruct
 from uuid import uuid4
 # import torch
@@ -203,6 +204,41 @@ async def recover_snapshot(data: RecoverSnapshot):
 #         )
 #     return JSONResponse(status_code=200, content={"message": "Delete snapshot successfully"})
 
+async def _enforce_face_limit(collection_name: str, employee_id: str, limit: int = 10):
+    scroll_filter = models.Filter(
+        must=[
+            models.FieldCondition(
+                key="id", 
+                match=models.MatchValue(value=employee_id)
+            )
+        ]
+    )
+
+    points, _ = await client.scroll(
+        collection_name=collection_name,
+        scroll_filter=scroll_filter,
+        limit=limit + 5, 
+        with_payload=True,
+        with_vectors=False
+    )
+
+    if len(points) >= limit:
+        sorted_points = sorted(
+            points, 
+            key=lambda x: x.payload.get('time_created', '')
+        )
+
+        num_to_delete = len(points) - limit + 1
+        
+        points_to_delete = [p.id for p in sorted_points[:num_to_delete]]
+
+        if points_to_delete:
+            print(f"User {employee_id} has {len(points)} faces. Deleting {len(points_to_delete)} old face(s)...")
+            await client.delete(
+                collection_name=collection_name,
+                points_selector=models.PointIdsList(points=points_to_delete)
+            )
+
 @app.post("/insert_point", tags=["Point"])
 async def insert_point(data:InsertPoint):
     collection_name = data.collection_name
@@ -211,7 +247,7 @@ async def insert_point(data:InsertPoint):
     name = data.name
     store_id = data.store_id
     is_update_id = data.is_update_id
-    time_created = datetime.datetime.now().strftime("%Y/%m/%d")
+    time_created = datetime.datetime.now().strftime("%Y/%m/%d %H:%M:%S")
     
     if collection_name == "" or collection_name is None:
         return JSONResponse(status_code=404, content={"message": "Collection name not found or invalid!"})
@@ -228,6 +264,13 @@ async def insert_point(data:InsertPoint):
         return JSONResponse(status_code=404, content={"message": "Name not found or invalid!"})
     
     _id = str(uuid4())
+
+    try:
+        if not is_update_id:
+            await _enforce_face_limit(collection_name, id, limit=10)
+    except Exception as e:
+        print(f"Error checking face limit: {str(e)}")
+
     payload = {
         'id': id,
         'name': name,
