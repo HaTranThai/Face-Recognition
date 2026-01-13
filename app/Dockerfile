@@ -25,27 +25,28 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip
 
 RUN pip3 install opencv-contrib-python==4.10.0.84
 RUN pip3 install opencv-python==4.10.0.84
-RUN pip3 install 'tensorflow[and-cuda]'
+RUN pip3 install 'tensorflow[and-cuda]==2.18.0'
 RUN pip3 install --no-cache-dir "pandas==2.2.2"
 RUN pip3 install deepface==0.0.93
 RUN pip3 install ultralytics==8.2.97
 RUN pip3 install mediapipe==0.10.15
-RUN pip3 install scipy
+RUN pip3 install scipy=='1.13.1'
 
-RUN pip3 install fastapi
-RUN pip3 install uvicorn
-RUN pip3 install requests
-RUN pip3 install python-multipart
-RUN pip3 install python-dotenv
-RUN pip3 install boto3
-RUN pip3 install httpx
-RUN pip3 install aioboto3
+RUN pip3 install fastapi=='0.128.0'
+RUN pip3 install uvicorn=='0.39.0'
+RUN pip3 install requests=='2.32.5'
+RUN pip3 install python-multipart=='0.0.20'
+RUN pip3 install python-dotenv=='1.2.1'
+RUN pip3 install boto3=='1.40.61'
+RUN pip3 install httpx=='0.28.1'
+RUN pip3 install aioboto3=='15.5.0'
 
 WORKDIR /app
 
 # Copy requirements first for better caching
 COPY requirements.txt /app/
 RUN pip3 install -r requirements.txt
+RUN pip3 install tf-keras==2.18.0
 
 # Copy source code
 COPY main.py /app/

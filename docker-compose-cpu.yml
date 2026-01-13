@@ -2,7 +2,7 @@
 
 services:
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.16.3
     container_name: qdrant-container
     ulimits:
       nofile:
@@ -15,7 +15,7 @@ services:
     restart: always
     volumes:
       - qdrant_data:/qdrant/storage
-      - ./qdrant_storage:/qdrant/storage  # Mount actual data directory
+      # - ./qdrant_storage:/qdrant/storage  # Mount actual data directory
       - ./app/snapshots:/qdrant/snapshots
 
   api_db:
@@ -32,6 +32,7 @@ services:
     depends_on:
       - qdrant
     environment:
+      - TZ=America/Chicago
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - FASTAPI_PORT=7005
@@ -57,6 +58,7 @@ services:
     environment:
       # - NVIDIA_VISIBLE_DEVICES=1
       # - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - TZ=America/Chicago
       - QDRANT_DB_HOST=api_db
       - QDRANT_DB_PORT=7005
       - HOST=0.0.0.0
