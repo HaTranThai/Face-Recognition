@@ -394,7 +394,7 @@ class DatabaseClient:
                 
         except Exception as e:
             logger.error(f"Error recovering snapshot {snapshot_name}: {str(e)}")
-            return False
+            return False, str(e)
     
     async def recover_snapshot_local(self, collection_name: str) -> bool:
         """
