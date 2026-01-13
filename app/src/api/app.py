@@ -70,25 +70,60 @@ def create_app() -> FastAPI:
             # Create logs directory if not exists
             os.makedirs("./logs", exist_ok=True)
             
-            # Test face recognition initialization
+            logger.info("Performing startup connection checks...")
+            
+            # Init service tạm để check
+            from src.services.face_service import FaceService
+            svc = FaceService(settings)
+            
+            # Check Qdrant
             try:
-                test_image_path = 'testface.jpg'
-                if os.path.exists(test_image_path):
-                    image = cv2.imread(test_image_path)
-                    face_is_real = DeepFace.extract_faces(
-                        img_path=image,
-                        detector_backend="yolov8",
-                        align=True,
-                        anti_spoofing=True,
-                    )
-                    logger.info(f"Application started successfully, test face real: {len(face_is_real) > 0}")
+                col = await svc.database_client.get_collections()
+                if isinstance(col, list):
+                    logger.info("✅ Startup Check: Qdrant CONNECTED")
                 else:
-                    logger.info("Application started successfully (no test image)")
-            except Exception as test_error:
-                logger.warning(f"Test face recognition failed: {str(test_error)}")
+                    logger.error("❌ Startup Check: Qdrant FAILED")
+            except Exception as e:
+                logger.error(f"❌ Startup Check: Qdrant ERROR - {e}")
+
+            # Check MinIO
+            try:
+                svc.image_processor._get_s3_client().list_buckets()
+                logger.info("✅ Startup Check: MinIO CONNECTED")
+            except Exception as e:
+                logger.error(f"❌ Startup Check: MinIO ERROR - {e}")
+
+            test_image_path = './static/images/testface.jpg' 
+            
+            if os.path.exists(test_image_path):
+                logger.info(f"Found test image at {test_image_path}. Warming up AI models...")
+                
+                image = cv2.imread(test_image_path)
+                
+                logger.info("Loading Detection Model...")
+                DeepFace.extract_faces(
+                    img_path=image,
+                    detector_backend="yolov8",
+                    align=True,
+                    enforce_detection=False 
+                )
+                
+                logger.info("Loading Recognition Model (VGG-Face)...")
+                DeepFace.represent(
+                    img_path=image,
+                    model_name="VGG-Face",
+                    detector_backend="skip", 
+                    align=True,
+                    normalization="VGGFace2",
+                )
+                
+                logger.info("✅ All AI Models warmed up successfully! Ready to serve requests fast.")
+            else:
+                logger.warning(f"⚠️ Test image NOT found at {test_image_path}. Cold start issues will occur!")
+                logger.warning(f"Current working directory: {os.getcwd()}")
                 
         except Exception as e:
-            logger.error(f"Error during startup: {str(e)}")
+            logger.error(f"Error during startup warm-up: {str(e)}")
 
     @app.on_event("shutdown")
     async def shutdown_event():
