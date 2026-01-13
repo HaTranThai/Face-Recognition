@@ -2,7 +2,6 @@ import os
 import httpx
 import glob
 
-# --- CẤU HÌNH ---
 SERVER_IP = "localhost"
 DB_API_PORT = 7005       
 QDRANT_PORT = 6333       

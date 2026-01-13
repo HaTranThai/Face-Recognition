@@ -32,6 +32,7 @@ services:
     depends_on:
       - qdrant
     environment:
+      - TZ=America/Chicago
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - FASTAPI_PORT=7005
@@ -57,6 +58,7 @@ services:
     environment:
       # - NVIDIA_VISIBLE_DEVICES=1
       # - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - TZ=America/Chicago
       - QDRANT_DB_HOST=api_db
       - QDRANT_DB_PORT=7005
       - HOST=0.0.0.0
