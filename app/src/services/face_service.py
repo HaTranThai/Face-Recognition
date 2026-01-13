@@ -36,20 +36,47 @@ from ..utils.legacy import (
 from ..core.models import CreateFace, FaceRecog, DeleteFace
 from config.logging import get_face_logger
 
+import threading
+
 logger = get_face_logger()
 
 # Giới hạn kết nối đồng thời 
-HTTP_SEMAPHORE = asyncio.Semaphore(10)
-PROCESSING_SEMAPHORE = asyncio.Semaphore(10)
+HTTP_SEMAPHORE = asyncio.Semaphore(20)
+PROCESSING_SEMAPHORE = asyncio.Semaphore(15)
 
 
 class FaceService:
     """Service class for handling face recognition operations."""
     
+    
+    # Class-level cache cho model
+    _model_cache = {}
+    _cache_lock = threading.Lock()
+    
     def __init__(self, config):
         self.config = config
         self.image_processor = ImageProcessor(config)
         self.database_client = DatabaseClient(config.QDRANT_DB_HOST, config.QDRANT_DB_PORT)
+        
+        # Preload models
+        self._ensure_models_loaded()
+    
+    
+    def _ensure_models_loaded(self):
+        """Preload face detection models to avoid cold starts."""
+        with self._cache_lock:
+            if 'detector' not in self._model_cache:
+                try:
+                    # Warm up the detector
+                    import cv2
+                    import numpy as np
+                    dummy_img = np.zeros((640, 480, 3), dtype=np.uint8)
+                    from ..utils.legacy import detect_face
+                    detect_face(dummy_img)
+                    self._model_cache['detector'] = True
+                    logger.info("Face detection model preloaded successfully")
+                except Exception as e:
+                    logger.error(f"Failed to preload face detection model: {e}")
     
     async def detect_and_embed_face(
         self, 
