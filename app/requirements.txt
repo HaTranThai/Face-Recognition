@@ -18,10 +18,10 @@
 # boto3==1.36.15
 # httpx
 # aioboto3
-tf-keras
-aiobotocore
-pydantic==2.5.0
-pydantic-settings
+# tf-keras
+aiobotocore==2.25.1
+pydantic>=2.5,<3
+pydantic-settings>=2,<3
 
 # Utilities
 Pillow==10.1.0
