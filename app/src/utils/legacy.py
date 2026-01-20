@@ -45,10 +45,22 @@ mp_face_detection = mp.solutions.face_detection
 logger = logging.getLogger(__name__)
 
 
+import time
+
+debug_logger = logging.getLogger("debug_timer")
+debug_logger.setLevel(logging.INFO)
+
+if not debug_logger.handlers:
+    log_path = os.path.join(os.getcwd(), "logs/debug.log")
+    
+    handler = logging.FileHandler(log_path)
+    
+    formatter = logging.Formatter('%(asctime)s - %(message)s')
+    handler.setFormatter(formatter)
+    
+    debug_logger.addHandler(handler)
+
 def get_embedding(imgf, imgf_real):
-    """
-    Get embedding from ndarray image and check face is real or not
-    """
     embedding_objs = DeepFace.represent(
         img_path=imgf,
         model_name="VGG-Face",
@@ -57,13 +69,19 @@ def get_embedding(imgf, imgf_real):
         normalization="VGGFace2",
         anti_spoofing=True,
     )
+    start_t = time.time()
+
     face_is_real = DeepFace.extract_faces(
         img_path=imgf_real,
         detector_backend="yolov8",
-        align=True,
+        align=False,
         anti_spoofing=True,
     )
-    # get confidence largest
+
+    end_t = time.time()
+    duration = end_t - start_t
+    
+    debug_logger.info(f"DeepFace.extract_faces (YOLOv8 + Anti-spoofing) took: {duration:.4f} seconds")
     index_confidence_face = 0
     max_confidence = 0
     if len(face_is_real) > 1:

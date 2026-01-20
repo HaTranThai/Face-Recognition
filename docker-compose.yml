@@ -51,7 +51,7 @@ services:
     volumes:
       - ./app:/app
       - ./app/snapshots:/app/snapshots
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "2024", "--workers", "3"]
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "2024", "--workers", "1"]
     depends_on:
       - qdrant
       - api_db
@@ -72,8 +72,8 @@ services:
     container_name: minio_container
     restart: always
     ports:
-      - "9000:9000" 
-      - "9001:9001" 
+      - "9026:9000" 
+      - "9027:9001" 
     environment:
       MINIO_ROOT_USER: minioadmin 
       MINIO_ROOT_PASSWORD: minioadmin1245 
