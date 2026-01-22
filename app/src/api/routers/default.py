@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from ...services.face_service import FaceService
 from config.settings import get_settings
 from config.logging import get_app_logger
+import os
 
 logger = get_app_logger()
 router = APIRouter()

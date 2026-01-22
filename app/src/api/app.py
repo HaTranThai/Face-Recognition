@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from config.settings import get_settings
 from config.logging import setup_logging, get_app_logger
 from .routes import router
+from .routers import default_router
 
 settings = get_settings()
 
@@ -54,9 +55,9 @@ def create_app() -> FastAPI:
     
     # Mount static files
     app.mount("/static", StaticFiles(directory=settings.STATIC_PATH), name="static")
-    
+    app.include_router(default_router)
     # Include API routes
-    app.include_router(router)
+    app.include_router(router, prefix="/api/v1")
     
     @app.on_event("startup")
     async def startup_event():

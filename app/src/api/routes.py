@@ -61,7 +61,7 @@ async def verify_system_health():
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-router.include_router(default_router)
+# router.include_router(default_router)
 router.include_router(health_router, prefix="/health")
 
 secure_dependencies = [
@@ -69,7 +69,7 @@ secure_dependencies = [
     Depends(verify_system_health)  
 ]
 
-router.include_router(face_router, dependencies=secure_dependencies)
+router.include_router(face_router, prefix="/face", dependencies=secure_dependencies)
 router.include_router(database_router, prefix="/qdrant", dependencies=secure_dependencies)
 router.include_router(test_router, prefix="/test", dependencies=secure_dependencies)
 router.include_router(minio_router, prefix="/minio", dependencies=secure_dependencies)
