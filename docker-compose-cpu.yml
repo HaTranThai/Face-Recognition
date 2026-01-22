@@ -15,8 +15,10 @@ services:
     restart: always
     volumes:
       - qdrant_data:/qdrant/storage
-      # - ./qdrant_storage:/qdrant/storage  # Mount actual data directory
       - ./app/snapshots:/qdrant/snapshots
+    environment:
+      - TZ=${TIMEZONE}
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY}
 
   api_db:
     build: ./qdrant_database_FE/
@@ -32,7 +34,8 @@ services:
     depends_on:
       - qdrant
     environment:
-      - TZ=America/Chicago
+      - TZ=${TIMEZONE}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - FASTAPI_PORT=7005
@@ -58,7 +61,7 @@ services:
     environment:
       # - NVIDIA_VISIBLE_DEVICES=1
       # - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - TZ=America/Chicago
+      - TZ=${TIMEZONE}
       - QDRANT_DB_HOST=api_db
       - QDRANT_DB_PORT=7005
       - HOST=0.0.0.0
@@ -74,8 +77,8 @@ services:
       - "9000:9000" 
       - "9001:9001" 
     environment:
-      MINIO_ROOT_USER: minioadmin 
-      MINIO_ROOT_PASSWORD: minioadmin1245 
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER} 
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD} 
     command: server /data --console-address ":9001"
     volumes:
       - ./app/miniodata:/data

@@ -16,7 +16,7 @@ services:
     restart: always
     volumes:
       - qdrant_data:/qdrant/storage
-      - ./qdrant_storage:/qdrant/storage  # Mount actual data directory
+      # - ./qdrant_storage:/qdrant/storage  # Mount actual data directory
       - ./app/snapshots:/qdrant/snapshots
     environment:
       - QDRANT__GPU__INDEXING=1

@@ -39,11 +39,12 @@ logger.info("Database API service starting...")
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int( os.getenv("QDRANT_PORT", "6333"))
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", None)
 THRESHOLD_PASS = 0.54
 THRESHOLD_SEARCH = 0.54
 
 logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
-client = AsyncQdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=300)
+client = AsyncQdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=300, api_key=QDRANT_API_KEY, https=False)
 
 class CreateCollection(BaseModel):
     collection_name: str = None
