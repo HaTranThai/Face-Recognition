@@ -20,3 +20,6 @@ snapshots/
 /app/snapshots/
 /app/miniodata/
 **/__pycache__/
+**/*.pyc
+*.log
+backup_data
